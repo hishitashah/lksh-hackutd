@@ -387,6 +387,11 @@ export interface components {
              */
             risk_level?: ("low" | "moderate" | "high" | "critical") | null;
             /**
+             * Safeguards
+             * @description Recommended safeguards from this agent's perspective (environment agent, §6.4). Empty if none.
+             */
+            safeguards?: string[];
+            /**
              * Status
              * @description 'completed', or why the analysis is missing.
              * @enum {string}

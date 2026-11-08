@@ -108,6 +108,14 @@
             "description": "Overall environmental risk. Environment agent only.",
             "title": "Risk Level"
           },
+          "safeguards": {
+            "description": "Recommended safeguards from this agent's perspective (environment agent, §6.4). Empty if none.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Safeguards",
+            "type": "array"
+          },
           "status": {
             "description": "'completed', or why the analysis is missing.",
             "enum": [

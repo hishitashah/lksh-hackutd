@@ -556,6 +556,10 @@ class AgentAssessment(ApiModel):
     options: list[OptionAssessment] = Field(description="Per-option comparison from this agent's perspective.")
     uncertainties: list[str] = Field(description="Missing data or assumptions that could change the conclusion.")
     suggested_interventions: list[str] = Field(description="Option labels this agent favors, best first.")
+    safeguards: list[str] = Field(
+        default_factory=list,
+        description="Recommended safeguards from this agent's perspective (environment agent, §6.4). Empty if none.",
+    )
     explanation: str = Field(description="Plain-English explanation for the operator.")
     llm_used: bool = Field(
         description="True if Nemotron wrote the explanation. False = deterministic text (Nemotron off or not needed)."

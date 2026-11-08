@@ -105,7 +105,8 @@
         ],
         "explanation": "Two trucks can't cover three tanks, so the optimizer tried every split of the fleet. Sending the trucks to B and A and shutting in S2_WELL_C1 late at C is the cheapest combination that keeps all three tanks under the shutdown limit: $3,108 instead of $12,241.",
         "llm_used": false,
-        "error": null
+        "error": null,
+        "safeguards": []
       }
     },
     {
@@ -185,7 +186,12 @@
         ],
         "explanation": "The pump failures are contained by design, so the main environmental concern is the leak on S5_PIPELINE_B: about 35 bbl of water is unaccounted for so far. Inspect it first.",
         "llm_used": false,
-        "error": null
+        "error": null,
+        "safeguards": [
+          "Inspect S5_PIPELINE_B first: about 3.5 bbl more becomes unaccounted each hour the pump runs.",
+          "Keep each failed S2 tank under its 92% limit with the selected plan; the automatic shut-in is the last line of containment.",
+          "Truck crews: confirm each load (150 bbl per truck trip) reaches the disposal site."
+        ]
       }
     },
     {
@@ -221,7 +227,8 @@
         "suggested_interventions": [],
         "explanation": "The feasibility agent is planned but not implemented yet, so this perspective is missing from the decision.",
         "llm_used": false,
-        "error": null
+        "error": null,
+        "safeguards": []
       }
     },
     {
@@ -257,7 +264,8 @@
         "suggested_interventions": [],
         "explanation": "The production agent is planned but not implemented yet, so this perspective is missing from the decision.",
         "llm_used": false,
-        "error": null
+        "error": null,
+        "safeguards": []
       }
     },
     {

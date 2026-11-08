@@ -67,6 +67,16 @@ class Settings(BaseSettings):
         default=6, description="Latest tank readings fitted with a line to estimate the current level (sensor noise)."
     )
 
+    # --- Environmental risk policy (ARCHITECTURE.md §6.3: "only use classifications with defined criteria") ---
+    # These are policy choices, not physics. In history/full_week a leak loses ~4 bbl in 2 h, 12-19 bbl by 6 h and
+    # 23-32 bbl by 12 h, with the missing rate growing ~40 -> ~160 bpd, so 'high' is reached ~10-12 h into a leak.
+    env_leak_high_bbl: float = Field(
+        default=25.0, description="A leak is 'high' environmental risk once this much water is unaccounted for (bbl)."
+    )
+    env_leak_high_rate_bpd: float = Field(
+        default=150.0, description="A leak is also 'high' risk once water goes missing at least this fast (bpd)."
+    )
+
     # --- Mock mode (M0) ----------------------------------------------------------
     nightwatch_mock: bool = Field(
         default=True,
