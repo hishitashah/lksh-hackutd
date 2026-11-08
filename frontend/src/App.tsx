@@ -14,6 +14,7 @@ import { NavLink, Route, Routes } from "react-router-dom";
 import { DatasetSwitcher } from "@/components/DatasetSwitcher";
 import { MockBadge } from "@/components/MockBadge";
 import { cn } from "@/lib/utils";
+import { useActiveDatasetId } from "@/state/store";
 import { Command } from "@/pages/Command";
 import { Field } from "@/pages/Field";
 import { Handoff } from "@/pages/Handoff";
@@ -27,6 +28,9 @@ const NAV = [
 
 /** The whole app: header on top, the active page below. */
 export function App() {
+  // Links carry ?ds=<dataset> so a reload (or a phone) lands on the same network.
+  const ds = useActiveDatasetId();
+  const search = ds ? `?ds=${encodeURIComponent(ds)}` : "";
   return (
     <div className="min-h-screen">
       <header className="flex flex-wrap items-center gap-4 border-b border-border px-4 py-3">
@@ -35,7 +39,7 @@ export function App() {
           {NAV.map((item) => (
             <NavLink
               key={item.to}
-              to={item.to}
+              to={{ pathname: item.to, search }}
               end={item.to === "/"}
               className={({ isActive }) =>
                 cn("rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted", isActive && "bg-muted text-foreground")
