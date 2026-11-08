@@ -1,6 +1,6 @@
 # Backend next step: the "H6 thin slice" (P1–P3)
 
-> **Superseded for tonight by [TONIGHT.md](TONIGHT.md)** (two backend lanes, cut scope, 2:30 AM freeze).
+> **Superseded for tonight by [TONIGHT.md](TONIGHT.md)** (Person 1–4 assignments, cut scope, 2:30 AM freeze).
 > The file-level details below still apply to the parts TONIGHT.md keeps.
 
 **Goal:** one real pump failure goes **detected → countdown → cheapest plan → API → first Sentinel explanation**,
