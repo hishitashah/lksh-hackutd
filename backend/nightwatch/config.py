@@ -37,6 +37,36 @@ class Settings(BaseSettings):
         ),
     )
 
+    # --- Monitoring thresholds (ARCHITECTURE.md §3.2-3.3, §13: documented and configurable) --------------
+    # Tuned on history/full_week: with these values all 23 labelled problems are found, with 0 false alarms
+    # and 0 duplicate incidents (see backend/scripts/score.py). σ is each asset's own noise level
+    # (MAD-based standard deviation of its running samples), so the thresholds adapt to any network.
+    detect_window_samples: int = Field(
+        default=6, description="Readings averaged together (while the pump runs) before judging a leak or wear."
+    )
+    leak_pressure_sigma: float = Field(
+        default=2.5, description="Leak: pipeline pressure must be this many σ below its normal level."
+    )
+    leak_gap_sigma: float = Field(
+        default=0.5, description="Leak: pump flow minus pipeline receive flow must be this many σ above normal."
+    )
+    wear_discharge_sigma: float = Field(
+        default=2.0, description="Worn pump: discharge pressure must be this many σ below normal (no leak signature)."
+    )
+    backdate_sigma: float = Field(
+        default=1.0, description="Onset is moved back while the signal stays more than this many σ from normal."
+    )
+    merge_gap_hours: float = Field(
+        default=6.0, description="Abnormal stretches closer than this are one incident (no duplicates)."
+    )
+    min_segment_samples: int = Field(default=3, description="Abnormal readings needed before an incident is raised.")
+    baseline_min_samples: int = Field(
+        default=24, description="Running readings needed to learn an asset's normal behavior before judging it."
+    )
+    countdown_fit_samples: int = Field(
+        default=6, description="Latest tank readings fitted with a line to estimate the current level (sensor noise)."
+    )
+
     # --- Mock mode (M0) ----------------------------------------------------------
     nightwatch_mock: bool = Field(
         default=True,

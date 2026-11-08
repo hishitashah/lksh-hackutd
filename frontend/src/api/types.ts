@@ -199,8 +199,7 @@ export interface paths {
          * Get Network
          * @description Static description of a dataset: network.json, ops.json and the telemetry time window.
          *
-         *     Real in M0 so the map (T6.3) can be built on real geometry. Reads only the three
-         *     dataset files, never the answer key.
+         *     The time range comes from the telemetry (SPEC: no file states it). Never reads the answer key.
          */
         get: operations["get_network_api__ds__network_get"];
         put?: never;
@@ -260,7 +259,7 @@ export interface paths {
         };
         /**
          * Get Series
-         * @description One sensor's readings for the trend charts (T1.1 loader + T6.6 chart).
+         * @description One sensor's readings over time, for the trend charts. 404 if the dataset has no such sensor.
          */
         get: operations["get_series_api__ds__series_get"];
         put?: never;
@@ -300,7 +299,7 @@ export interface paths {
         };
         /**
          * Get State
-         * @description The whole network as of one moment: facilities, ordered alerts and events (T2.5 + T2.7).
+         * @description The whole network as of one moment: facilities, incidents, and alerts in SPEC order (Stage 1, §3).
          */
         get: operations["get_state_api__ds__state_get"];
         put?: never;

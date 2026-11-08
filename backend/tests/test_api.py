@@ -30,10 +30,9 @@ from nightwatch.models import (
 
 DS = "snapshot_2026-10-08T1200"
 
-# Routes that serve fixtures until their task lands: (method, path, json body or None).
+# Routes that serve fixtures until their phase lands: (method, path, json body or None).
+# /state and /series are real now (Stage 1 monitoring) and are tested separately.
 MOCK_ROUTES = [
-    ("get", f"/api/{DS}/state", None),
-    ("get", f"/api/{DS}/series?asset=S2_TANK_B&metric=level_pct", None),
     ("get", f"/api/{DS}/plan/EV-0009", None),
     ("post", f"/api/{DS}/simulate", {"event_id": "EV-0009", "actions": [{"type": "none"}]}),
     ("get", f"/api/{DS}/replay", None),
@@ -220,7 +219,25 @@ def test_unbuilt_routes_501_without_mock(real_client: TestClient, method: str, p
 
 
 def test_real_routes_work_without_mock(real_client: TestClient) -> None:
-    """Health, datasets and network don't depend on mock mode."""
+    """Health, datasets, network, state and series are real: they don't depend on mock mode."""
     assert real_client.get("/api/health").json()["mock"] is False
     assert real_client.get("/api/datasets").status_code == 200
     assert real_client.get("/api/full_week/network").status_code == 200
+    state = StateResponse.model_validate(real_client.get(f"/api/{DS}/state").json())
+    assert state.at_unix == state.now_unix == 1791460800  # 'now' = the snapshot's last telemetry row
+    series = SeriesResponse.model_validate(real_client.get(f"/api/{DS}/series?asset=S2_TANK_B&metric=level_pct").json())
+    assert series.points[-1][0] == 1791460800
+
+
+def test_real_state_is_the_demo_scenario(real_client: TestClient) -> None:
+    """ARCHITECTURE.md §16: at Thu 12:00 the three S2 pump failures come first, soonest shutdown first."""
+    alerts = real_client.get(f"/api/{DS}/state").json()["alerts"]
+    failures = [a["event"]["asset_id"] for a in alerts if a["event"]["category"] == "pump_failure"]
+    assert failures == ["S2_PUMP_B", "S2_PUMP_C", "S2_PUMP_A"]
+    others = {a["event"]["asset_id"] for a in alerts if a["event"]["category"] != "pump_failure"}
+    assert others == {"S5_PIPELINE_B", "S3_PUMP_A", "S4_PUMP_C"}
+
+
+def test_series_unknown_sensor_is_404(real_client: TestClient) -> None:
+    """Asking for a sensor that doesn't exist gives a clear 404, not an empty chart."""
+    assert real_client.get(f"/api/{DS}/series?asset=NOPE&metric=level_pct").status_code == 404
