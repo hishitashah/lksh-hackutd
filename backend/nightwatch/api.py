@@ -7,8 +7,8 @@ Every response is a model from ``models.py``, so the generated TypeScript types 
 
 How routes are built up over the hackathon
 ------------------------------------------
-* Real now: ``/health``, ``/datasets`` (folder scan) and ``/{ds}/network`` (reads
-  network.json + ops.json and the first/last telemetry timestamps).
+* Real now: ``/health``, ``/datasets`` (folder scan) and ``/{ds}/network`` (network.json +
+  ops.json + the time range, all read through the ``data.py`` loader).
 * Mock now: everything else answers from ``fixtures/`` while ``NIGHTWATCH_MOCK=1``.
   With mock mode off, those routes return 501 naming the task that will implement them.
   When your task lands, replace the ``_require_mock(...)`` branch with the real call.
@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Literal
@@ -30,6 +29,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from . import __version__, mocks
 from .config import REPO_ROOT, get_settings
+from .data import Dataset, UnknownDatasetError, get_dataset, scan_datasets
 from .models import (
     AgentRunResult,
     ApproveRequest,
@@ -37,15 +37,12 @@ from .models import (
     DraftAction,
     ExportEvent,
     Health,
-    Network,
     NetworkResponse,
-    Ops,
     PlanResponse,
     ReplayResult,
     SeriesResponse,
     SimulateRequest,
     StateResponse,
-    TimeRange,
 )
 
 app = FastAPI(
@@ -53,9 +50,6 @@ app = FastAPI(
     version=__version__,
     description="Backend for the Avon Nightwatch operator console. See ARCHITECTURE.md for the design.",
 )
-
-# The three files every dataset folder must contain (README "What you get").
-DATASET_FILES = ("network.json", "ops.json", "telemetry.csv")
 
 # Pause between mock Sentinel steps so the UI can show them arriving one by one.
 # Tests set this to 0.
@@ -67,41 +61,30 @@ MOCK_STEP_DELAY_S = 0.5
 # ---------------------------------------------------------------------------
 
 
-def scan_datasets() -> dict[str, Path]:
-    """Find every dataset folder under the configured ``DATA_DIRS``.
-
-    A folder is a dataset when it holds all three files. A top-level folder that is a
-    dataset itself (``test/``) gets its own name as ID; otherwise each qualifying
-    subfolder does (``history/full_week`` -> ``full_week``). Runs on every request, so a
-    newly pulled ``test/`` folder shows up without restarting the server.
-
-    Returns:
-        Mapping of dataset ID -> absolute folder path, sorted by ID. If two folders share
-        a name, the first one found wins.
-    """
-    found: dict[str, Path] = {}
-    for rel in get_settings().data_dir_list:
-        root = REPO_ROOT / rel
-        if not root.is_dir():
-            continue  # e.g. test/ before the organizers release it
-        candidates = [root] if _is_dataset(root) else sorted(p for p in root.iterdir() if p.is_dir())
-        for folder in candidates:
-            if _is_dataset(folder):
-                found.setdefault(folder.name, folder)
-    return dict(sorted(found.items()))
-
-
-def _is_dataset(folder: Path) -> bool:
-    """True if ``folder`` contains network.json, ops.json and telemetry.csv."""
-    return all((folder / name).is_file() for name in DATASET_FILES)
-
-
 def _dataset_path(ds: str) -> Path:
     """Resolve a dataset ID to its folder, or answer 404 if it doesn't exist."""
     path = scan_datasets().get(ds)
     if path is None:
         raise HTTPException(status_code=404, detail=f"Unknown dataset '{ds}'. See GET /api/datasets.")
     return path
+
+
+def _dataset(ds: str) -> Dataset:
+    """Load a dataset through the cached ``data.py`` loader, mapping failures to HTTP errors.
+
+    Use this only in routes that really need the telemetry; routes that just check the ID exists
+    call ``_dataset_path`` so they stay instant.
+
+    Raises:
+        HTTPException: 404 for an unknown ID (same message as ``_dataset_path``), 422 when the
+            folder exists but its files can't be parsed (the message says which file and why).
+    """
+    try:
+        return get_dataset(ds)
+    except UnknownDatasetError:
+        raise HTTPException(status_code=404, detail=f"Unknown dataset '{ds}'. See GET /api/datasets.") from None
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=f"Dataset '{ds}' could not be loaded: {err}") from err
 
 
 def _require_mock(task: str) -> None:
@@ -115,39 +98,6 @@ def _require_mock(task: str) -> None:
             status_code=501,
             detail=f"Not implemented yet (task {task}). Set NIGHTWATCH_MOCK=1 to use fixtures.",
         )
-
-
-def read_time_range(csv_path: Path) -> TimeRange:
-    """Read the dataset's time window from telemetry.csv without loading the whole file.
-
-    SPEC: no file states the time range; it is the first and last ``ts_unix`` in the
-    telemetry, and the last one is "now". We read the header, the first rows (to find
-    the step between readings) and the last line (via a seek from the end).
-
-    T1.1 (data.py) replaces this with the full loader; keep the same results.
-    """
-    with open(csv_path, "rb") as f:
-        header = f.readline().decode().strip().split(",")
-        ts_col = header.index("ts_unix")
-
-        # First timestamp, then keep reading until the timestamp changes to get the step.
-        first_line = f.readline()
-        first_ts = int(first_line.split(b",")[ts_col])
-        step_s = 0
-        for line in f:
-            ts = int(line.split(b",")[ts_col])
-            if ts != first_ts:
-                step_s = ts - first_ts
-                break
-
-        # Last timestamp: read the final few KB and take the last non-empty line.
-        f.seek(0, os.SEEK_END)
-        size = f.tell()
-        f.seek(max(0, size - 4096))
-        tail = [ln for ln in f.read().splitlines() if ln.strip()]
-        last_ts = int(tail[-1].split(b",")[ts_col])
-
-    return TimeRange(start_unix=first_ts, now_unix=last_ts, step_s=step_s)
 
 
 # ---------------------------------------------------------------------------
@@ -180,12 +130,11 @@ def get_network(ds: str) -> NetworkResponse:
     """Static description of a dataset: network.json, ops.json and the telemetry time window.
 
     Real in M0 so the map (T6.3) can be built on real geometry. Reads only the three
-    dataset files, never the answer key.
+    dataset files (through ``data.py``), never the answer key. The time range comes from the
+    telemetry itself (SPEC: no file states it).
     """
-    folder = _dataset_path(ds)
-    network = Network.model_validate(json.loads((folder / "network.json").read_text()))
-    ops = Ops.model_validate(json.loads((folder / "ops.json").read_text()))
-    return NetworkResponse(dataset_id=ds, network=network, ops=ops, time_range=read_time_range(folder / "telemetry.csv"))
+    loaded = _dataset(ds)
+    return NetworkResponse(dataset_id=ds, network=loaded.network, ops=loaded.ops, time_range=loaded.time_range)
 
 
 # ---------------------------------------------------------------------------

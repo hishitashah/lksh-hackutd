@@ -4,6 +4,7 @@ Modules (ARCHITECTURE.md §14 has the full map):
 
 * ``config``  - settings read from environment variables / ``.env``
 * ``models``  - the data contract shared with the frontend (ARCHITECTURE.md §12.1)
+* ``data``    - loads a dataset folder into numpy arrays; the only reader of telemetry.csv (§3.1)
 * ``mocks``   - fixture loader used while the real engine is being built (clearly labelled mock data)
 * ``api``     - the FastAPI app the frontend talks to
 
