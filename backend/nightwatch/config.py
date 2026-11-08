@@ -78,13 +78,22 @@ class Settings(BaseSettings):
 
     # --- NVIDIA Nemotron (M5) -------------------------------------------------
     nvidia_api_key: str | None = Field(default=None, description="build.nvidia.com API key. Never commit it.")
+    # Not every listed model is enabled for every account: `make check-nvidia ARGS=--ping` shows which ones answer.
+    # These defaults answered on our key (the 'super-120b' and 'nano-3' models returned "not found for account").
     super_model: str = Field(
-        default="nvidia/nemotron-3-super-120b-a12b",
-        description="Orchestrator model for Sentinel. Confirm the name with `make check-nvidia`.",
+        default="nvidia/nemotron-3-ultra-550b-a55b",
+        description="Main Nemotron model for agent and orchestrator explanations (must answer the --ping check).",
     )
     nano_model: str = Field(
-        default="nvidia/nemotron-3-nano-30b-a3b",
-        description="Fast model for evidence text and handoffs. Confirm the name with `make check-nvidia`.",
+        default="nvidia/nemotron-3.5-lightning-30b-a3b",
+        description="Smaller, faster Nemotron model (not used yet). Must answer `make check-nvidia ARGS=--ping`.",
+    )
+    nemotron_thinking: bool = Field(
+        default=False,
+        description=(
+            "Nemotron 3 models can 'think' before answering. Off by default: explanations come back in ~1 s instead "
+            "of ~6-9 s, and thinking can use up the answer budget and return empty text."
+        ),
     )
     super_base_url: str = Field(
         default="https://integrate.api.nvidia.com/v1",

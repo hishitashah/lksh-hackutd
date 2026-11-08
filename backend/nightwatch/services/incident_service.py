@@ -8,8 +8,9 @@ Builds a ``StateResponse`` from monitoring output:
   first, ties going to the higher lost revenue per hour; then leaks and worn pumps (any order, here by onset);
 * **lost_revenue_per_hour_total:** revenue lost right now by facilities whose wells are shut in.
 
-Alert labels: leaks and worn pumps get "Send inspector to …" (SPEC: they get a field inspection). Pump failures
-say "Plan pending" until the intervention planner (Phase 3) exists, so no cost is shown before it's computed.
+Alert labels: leaks and worn pumps get "Send inspector to …" (SPEC: they get a field inspection). Each pump failure
+shows its plan from the deterministic planner's joint plan for its system (``planning/intervention_planner.py``),
+e.g. "1 truck, 1 trip · $905", so failures that share trucks never all claim the same truck.
 """
 
 from __future__ import annotations
@@ -22,8 +23,10 @@ from ..monitoring.anomaly_detector import detect
 from ..monitoring.countdown import WELL_PRODUCING
 from ..monitoring.telemetry_processor import Dataset
 from ..planning.cost_calculator import facility_revenue_per_hour
+from ..planning.intervention_planner import plan_now
 
-PLAN_PENDING_LABEL = "Plan pending (cost analysis not built yet)"
+# Shown only if a pump failure has no plan (shouldn't happen: every ongoing failure is planned).
+PLAN_PENDING_LABEL = "Plan pending"
 
 
 def build_state(ds: Dataset, at: int | None = None) -> StateResponse:
@@ -62,7 +65,10 @@ def _build_state_cached(ds: Dataset, at: int) -> StateResponse:
         at_unix=at,
         now_unix=ds.now_unix,
         facilities=facilities,
-        alerts=build_alerts(events),
+        alerts=build_alerts(
+            events,
+            {eid: c.label for sp in plan_now(ds, at).values() for eid, c in sp.selection.items()},
+        ),
         events=events,
         lost_revenue_per_hour_total=round(lost_total, 2),
     )

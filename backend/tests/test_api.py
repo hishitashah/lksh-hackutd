@@ -31,9 +31,8 @@ from nightwatch.models import (
 DS = "snapshot_2026-10-08T1200"
 
 # Routes that serve fixtures until their phase lands: (method, path, json body or None).
-# /state and /series are real now (Stage 1 monitoring) and are tested separately.
+# /state, /series (Stage 1 monitoring) and /plan (Phase 3 planner) are real now and are tested separately.
 MOCK_ROUTES = [
-    ("get", f"/api/{DS}/plan/EV-0009", None),
     ("post", f"/api/{DS}/simulate", {"event_id": "EV-0009", "actions": [{"type": "none"}]}),
     ("get", f"/api/{DS}/replay", None),
     ("get", f"/api/{DS}/events.json", None),
@@ -126,7 +125,7 @@ def test_mock_payloads_match_models(client: TestClient) -> None:
     """Mock responses validate against the response models the frontend types are generated from."""
     StateResponse.model_validate(client.get(f"/api/{DS}/state").json())
     SeriesResponse.model_validate(client.get(f"/api/{DS}/series?asset=S2_TANK_B&metric=level_pct").json())
-    PlanResponse.model_validate(client.get(f"/api/{DS}/plan/EV-0009").json())
+    PlanResponse.model_validate(client.get(f"/api/{DS}/plan/S2_PUMP_B@1791450000").json())
     ReplayResult.model_validate(client.get(f"/api/{DS}/replay").json())
     for item in client.get(f"/api/{DS}/events.json").json():
         ExportEvent.model_validate(item)
@@ -241,3 +240,34 @@ def test_real_state_is_the_demo_scenario(real_client: TestClient) -> None:
 def test_series_unknown_sensor_is_404(real_client: TestClient) -> None:
     """Asking for a sensor that doesn't exist gives a clear 404, not an empty chart."""
     assert real_client.get(f"/api/{DS}/series?asset=NOPE&metric=level_pct").status_code == 404
+
+
+def test_real_plan_is_the_joint_plan(real_client: TestClient) -> None:
+    """/plan returns this failure's part of its system's joint plan (§16), with do nothing and traces."""
+    plan = PlanResponse.model_validate(real_client.get(f"/api/{DS}/plan/S2_PUMP_C@1791451800").json())
+    # S2 has 2 trucks for 3 failures: the planner gives S2_FACILITY_C a late shut-in, not a truck.
+    assert plan.cheapest.actions[0].type == "shut_in_wells" and plan.cheapest.actions[0].wells == ["S2_WELL_C1"]
+    assert abs(plan.cheapest.cost_total - 1298) < 15
+    assert plan.do_nothing.tank_trips is True and plan.cheapest.tank_trips is False
+    assert [t.label for t in plan.traces] == ["Do nothing", "Recommended plan"]
+    assert all(t.shutdown_pct == 92 for t in plan.traces)  # from network.json
+
+
+def test_plan_errors_are_clear(real_client: TestClient) -> None:
+    """Unknown incident → 404; a leak → 400 (inspection, not a plan); a resolved failure → 409."""
+    assert real_client.get(f"/api/{DS}/plan/NOPE").status_code == 404
+    leak = next(
+        a["event"]["id"]
+        for a in real_client.get(f"/api/{DS}/state").json()["alerts"]
+        if a["event"]["category"] == "pipeline_leak"
+    )
+    assert real_client.get(f"/api/{DS}/plan/{leak}").status_code == 400
+    assert real_client.get(f"/api/{DS}/plan/S1_PUMP_C@1791418800").status_code == 409  # repaired at 06:20
+
+
+def test_alert_labels_come_from_the_planner(real_client: TestClient) -> None:
+    """Pump-failure alerts show their planned action and cost, not a placeholder."""
+    alerts = real_client.get(f"/api/{DS}/state").json()["alerts"]
+    labels = [a["action_label"] for a in alerts if a["event"]["category"] == "pump_failure"]
+    assert labels[0].startswith("1 truck, 1 trip") and "$905" in labels[0]
+    assert "S2_WELL_C1" in labels[1]

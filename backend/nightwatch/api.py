@@ -7,8 +7,9 @@ Every response is a model from ``models.py``, so the generated TypeScript types 
 
 Real vs mock
 ------------
-* **Real:** ``/health``, ``/datasets``, ``/{ds}/network``, ``/{ds}/state`` and ``/{ds}/series``, backed by Stage 1
-  monitoring (``monitoring/``) and ``services/incident_service.py``. Real routes ignore ``NIGHTWATCH_MOCK``.
+* **Real:** ``/health``, ``/datasets``, ``/{ds}/network``, ``/{ds}/state``, ``/{ds}/series`` (Stage 1 monitoring,
+  ``monitoring/`` + ``services/incident_service.py``) and ``/{ds}/plan/{event_id}`` (the deterministic planner,
+  ``planning/``). Real routes ignore ``NIGHTWATCH_MOCK``.
 * **Mock until their phase lands:** planning, replay, export and the Sentinel/dispatch routes answer from
   ``fixtures/`` while ``NIGHTWATCH_MOCK=1``; with mock mode off they return 501. When a phase lands, replace its
   ``_require_mock(...)`` branch with the real call.
@@ -43,7 +44,9 @@ from .models import (
     SimulateRequest,
     StateResponse,
 )
+from .monitoring.anomaly_detector import detect
 from .monitoring.telemetry_processor import Dataset, TelemetryValidationError, get_dataset, scan_datasets
+from .planning.intervention_planner import plan_response
 from .services.incident_service import build_state
 
 app = FastAPI(
@@ -165,10 +168,26 @@ def get_plan(
     event_id: str,
     at: int | None = Query(default=None, description="Plan start, unix seconds. Omit for 'now'."),
 ) -> PlanResponse:
-    """Plan panel data for one pump failure: cheapest, long run, do nothing, alternatives (T3.5, T3.6)."""
-    _dataset_path(ds)
-    _require_mock("T3.5")
-    return mocks.mock_plan(event_id)
+    """Plan panel for one ongoing pump failure (ARCHITECTURE.md §5.3-5.5, §16).
+
+    Every number comes from the deterministic planner: the recommended plan is this failure's part of its system's
+    joint plan (shared trucks), plus doing nothing, the next alternatives and the tank-level traces.
+
+    Errors: 404 unknown event; 400 for a leak or worn pump (they get an inspection, not a plan); 409 if the pump
+    failure has already been resolved at that time.
+    """
+    d = _dataset(ds)
+    at = d.clamp(at)
+    event = next((e for e in detect(d, at) if e.id == event_id), None)
+    if event is None:
+        raise HTTPException(status_code=404, detail=f"No incident '{event_id}' at that time.")
+    if event.category != "pump_failure":
+        raise HTTPException(
+            status_code=400, detail="Plans are for pump failures; leaks and worn pumps get a field inspection."
+        )
+    if event.status != "ongoing":
+        raise HTTPException(status_code=409, detail=f"'{event_id}' was already resolved at that time.")
+    return plan_response(d, event_id, at)
 
 
 @app.post("/api/{ds}/simulate", response_model=PlanResponse, tags=["plans"])

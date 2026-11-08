@@ -219,7 +219,13 @@ export interface paths {
         };
         /**
          * Get Plan
-         * @description Plan panel data for one pump failure: cheapest, long run, do nothing, alternatives (T3.5, T3.6).
+         * @description Plan panel for one ongoing pump failure (ARCHITECTURE.md §5.3-5.5, §16).
+         *
+         *     Every number comes from the deterministic planner: the recommended plan is this failure's part of its system's
+         *     joint plan (shared trucks), plus doing nothing, the next alternatives and the tank-level traces.
+         *
+         *     Errors: 404 unknown event; 400 for a leak or worn pump (they get an inspection, not a plan); 409 if the pump
+         *     failure has already been resolved at that time.
          */
         get: operations["get_plan_api__ds__plan__event_id__get"];
         put?: never;

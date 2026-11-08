@@ -48,13 +48,17 @@ def ping(base_url: str, key: str, model: str) -> str:
         json={
             "model": model,
             "messages": [{"role": "user", "content": "Reply with the single word: ready"}],
-            "max_tokens": 16,
+            "max_tokens": 64,
             "temperature": 0,
+            # Same as the app: Nemotron 3 "thinking" off unless NEMOTRON_THINKING=1 (it can eat a short reply).
+            "chat_template_kwargs": {"enable_thinking": get_settings().nemotron_thinking},
         },
         timeout=TIMEOUT_S,
     )
+    if resp.status_code == 404 and "Not found for account" in resp.text:
+        raise httpx.HTTPError("listed, but not enabled for your account; pick another Nemotron model that answers the ping")
     resp.raise_for_status()
-    return resp.json()["choices"][0]["message"]["content"].strip()
+    return (resp.json()["choices"][0]["message"].get("content") or "").strip()
 
 
 def main() -> int:

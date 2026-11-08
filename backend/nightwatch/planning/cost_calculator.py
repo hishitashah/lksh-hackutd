@@ -36,6 +36,20 @@ def facility_revenue_per_hour(facility: Facility, prices: Prices, wells: Iterabl
     return sum(well_revenue_per_hour(w, prices) for w in (wells if wells is not None else facility.wells))
 
 
+def shut_in_cost_per_bbl(well: Well, prices: Prices) -> float:
+    """$ lost per barrel of water kept out of the tank by shutting this well in.
+
+    SPEC Plans: cost per bbl avoided = lost revenue per day ÷ baseline_water_bpd. It's the same however long the
+    well is off, which is why the cheapest well to shut in is the one with the lowest value here.
+    """
+    return well_revenue_per_hour(well, prices) * HOURS_PER_DAY / well.baseline_water_bpd
+
+
+def truck_cost_per_bbl(cost_per_trip: float, truck_capacity_bbl: float) -> float:
+    """$ per barrel hauled by an emergency truck trip (flat price ÷ capacity)."""
+    return cost_per_trip / truck_capacity_bbl
+
+
 def fill_rate_pct_per_hour(water_bpd: float, capacity_bbl: float) -> float:
     """How fast a tank fills with no pump running, in percentage points per hour.
 
