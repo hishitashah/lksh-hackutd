@@ -11,8 +11,9 @@
  *
  * The frontend does no math on plans or costs: every number comes from the API (plan.md rule).
  */
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import createClient from "openapi-fetch";
+import { useEffect, useState } from "react";
 
 import type { components, paths } from "./types";
 
@@ -25,6 +26,13 @@ export type PlanResponse = Schemas["PlanResponse"];
 export type ReplayResult = Schemas["ReplayResult"];
 export type DatasetInfo = Schemas["DatasetInfo"];
 export type NetworkResponse = Schemas["NetworkResponse"];
+export type Plan = Schemas["Plan"];
+export type PlanAction = Schemas["PlanAction"];
+export type AgentStep = Schemas["AgentStep"];
+export type AgentAssessment = Schemas["AgentAssessment"];
+export type Recommendation = Schemas["Recommendation"];
+export type DraftAction = Schemas["DraftAction"];
+export type ApproveRequest = Schemas["ApproveRequest"];
 
 /**
  * The client. `baseUrl` is empty because the API is on the same origin:
@@ -104,4 +112,135 @@ export function useReplay(ds: string | null, mode: "cheapest" | "long_run" = "lo
     enabled: ds !== null,
     queryFn: () => unwrap(api.GET("/api/{ds}/replay", { params: { path: { ds: ds! }, query: { mode } } })),
   });
+}
+
+// ---------------------------------------------------------------------------
+// Sentinel run (POST stream), operator approval, and the field feed (ARCHITECTURE.md §10-11)
+// ---------------------------------------------------------------------------
+
+/** Callbacks for the events of a Sentinel run, in the order the backend sends them. */
+export interface AgentStreamHandlers {
+  /** One step. The same `index` can arrive twice (running, then its final status): replace by index. */
+  onStep: (step: AgentStep) => void;
+  /** The orchestrator's final recommendation. */
+  onRecommendation: (rec: Recommendation) => void;
+  /** The drafted actions, all pending until the operator decides. */
+  onDrafts: (drafts: DraftAction[]) => void;
+  /** The end of the run: its ID (needed to approve drafts) and the 30-second shift handoff. */
+  onDone: (done: { run_id: string; handoff: string | null }) => void;
+}
+
+/** Parse one server-sent event block ("event: x\r\ndata: {...}") and hand it to the matching callback. */
+function dispatchSse(block: string, h: AgentStreamHandlers): void {
+  let event = "message";
+  const data: string[] = [];
+  for (const line of block.split(/\r?\n/)) {
+    if (line.startsWith(":")) continue; // comment / keep-alive ping
+    if (line.startsWith("event:")) event = line.slice(6).trim();
+    else if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /, ""));
+  }
+  if (data.length === 0) return;
+  const payload: unknown = JSON.parse(data.join("\n"));
+  if (event === "step") h.onStep(payload as AgentStep);
+  else if (event === "recommendation") h.onRecommendation(payload as Recommendation);
+  else if (event === "drafts") h.onDrafts(payload as DraftAction[]);
+  else if (event === "done") h.onDone(payload as { run_id: string; handoff: string | null });
+}
+
+/**
+ * Start a Sentinel run and read its stream (POST, so the browser's EventSource can't be used).
+ * `at` = time-machine position in unix seconds, or null for the dataset's "now".
+ * Resolves when the stream ends; rejects with "status: detail" if the server refuses the request.
+ */
+export async function streamAgentRun(
+  ds: string,
+  at: number | null,
+  handlers: AgentStreamHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
+  const base = import.meta.env.VITE_API_BASE ?? "";
+  const query = at !== null ? `?at=${at}` : "";
+  const res = await fetch(`${base}/api/${encodeURIComponent(ds)}/agent/run${query}`, {
+    method: "POST",
+    headers: { Accept: "text/event-stream" },
+    signal,
+  });
+  if (!res.ok || !res.body) {
+    let detail = res.statusText;
+    try {
+      const body = (await res.json()) as { detail?: unknown };
+      if (typeof body.detail === "string") detail = body.detail;
+    } catch {
+      /* body wasn't JSON: keep the status text */
+    }
+    throw new Error(`${res.status}: ${detail}`);
+  }
+  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buffer = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += value;
+    const blocks = buffer.split(/\r?\n\r?\n/); // sse-starlette separates events with a blank line (CRLF)
+    buffer = blocks.pop() ?? "";
+    for (const block of blocks) dispatchSse(block, handlers);
+  }
+  if (buffer.trim()) dispatchSse(buffer, handlers);
+}
+
+/**
+ * Approve or reject one drafted action. Approve dispatches it to the field right away.
+ * On 404/409 the mutation throws an Error whose message carries the backend's `detail` text.
+ */
+export function useApprove(ds: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: ApproveRequest) =>
+      unwrap(api.POST("/api/{ds}/agent/approve", { params: { path: { ds: ds! } }, body })),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["dispatches", ds] }),
+  });
+}
+
+/** Orders already sent to the field (status dispatched), newest first. */
+export function useDispatches(ds: string | null) {
+  return useQuery({
+    queryKey: ["dispatches", ds],
+    enabled: ds !== null,
+    queryFn: () => unwrap(api.GET("/api/{ds}/dispatches", { params: { path: { ds: ds! } } })),
+  });
+}
+
+/**
+ * The live field feed for the phone view: orders already dispatched, then each new one the moment the
+ * operator approves it (EventSource on GET /field/stream; the browser reconnects on its own).
+ * Returns the orders newest first, de-duplicated by ID, and whether the stream is currently connected.
+ */
+export function useFieldFeed(ds: string | null) {
+  const initial = useDispatches(ds);
+  // Live orders are kept per dataset, so switching dataset never shows another network's orders.
+  const [liveByDataset, setLiveByDataset] = useState<Record<string, DraftAction[]>>({});
+  const [connected, setConnected] = useState(false);
+
+  useEffect(() => {
+    if (ds === null) return;
+    const base = import.meta.env.VITE_API_BASE ?? "";
+    const source = new EventSource(`${base}/api/${encodeURIComponent(ds)}/field/stream`);
+    source.onopen = () => setConnected(true);
+    source.onerror = () => setConnected(false);
+    source.addEventListener("dispatch", (e) => {
+      const order = JSON.parse((e as MessageEvent<string>).data) as DraftAction;
+      setLiveByDataset((prev) => {
+        const current = prev[ds] ?? [];
+        return current.some((o) => o.id === order.id) ? prev : { ...prev, [ds]: [order, ...current] };
+      });
+    });
+    return () => source.close();
+  }, [ds]);
+
+  const byId = new Map<string, DraftAction>();
+  for (const order of [...(ds ? (liveByDataset[ds] ?? []) : []), ...(initial.data ?? [])]) {
+    if (!byId.has(order.id)) byId.set(order.id, order);
+  }
+  const orders = [...byId.values()].sort((a, b) => (b.dispatched_at ?? "").localeCompare(a.dispatched_at ?? ""));
+  return { orders, connected, isLoading: initial.isLoading, error: initial.error };
 }

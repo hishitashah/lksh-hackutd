@@ -35,6 +35,8 @@ export default defineConfig({
       workbox: {
         // Never serve API responses from the offline cache: alerts must always be live.
         navigateFallbackDenylist: [/^\/api/],
+        // The app bundle (echarts + maplibre) is ~2.7 MB; the default 2 MiB limit would fail the build.
+        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
       },
     }),
   ],
