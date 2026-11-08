@@ -8,9 +8,10 @@ Every response is a model from ``models.py``, so the generated TypeScript types 
 Real vs mock
 ------------
 * **Real:** ``/health``, ``/datasets``, ``/{ds}/network``, ``/{ds}/state``, ``/{ds}/series`` (Stage 1 monitoring,
-  ``monitoring/`` + ``services/incident_service.py``) and ``/{ds}/plan/{event_id}`` (the deterministic planner,
-  ``planning/``). Real routes ignore ``NIGHTWATCH_MOCK``.
-* **Mock until their phase lands:** planning, replay, export and the Sentinel/dispatch routes answer from
+  ``monitoring/`` + ``services/incident_service.py``), ``/{ds}/plan/{event_id}`` (the deterministic planner,
+  ``planning/``) and the Sentinel run, ``/{ds}/agent/run`` + ``/{ds}/agent/runs/{run_id}`` (the multi-agent
+  orchestrator, streamed by ``services/sentinel_service.py``). Real routes ignore ``NIGHTWATCH_MOCK``.
+* **Mock until their phase lands:** simulate, replay, export and the approval/dispatch routes answer from
   ``fixtures/`` while ``NIGHTWATCH_MOCK=1``; with mock mode off they return 501. When a phase lands, replace its
   ``_require_mock(...)`` branch with the real call.
 
@@ -20,7 +21,6 @@ Never read ``answer_key.json`` here: the app finds every problem from the sensor
 from __future__ import annotations
 
 import asyncio
-import json
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Literal
@@ -47,6 +47,7 @@ from .models import (
 from .monitoring.anomaly_detector import detect
 from .monitoring.telemetry_processor import Dataset, TelemetryValidationError, get_dataset, scan_datasets
 from .planning.intervention_planner import plan_response
+from .services import sentinel_service
 from .services.incident_service import build_state
 
 app = FastAPI(
@@ -55,7 +56,7 @@ app = FastAPI(
     description="Backend for the Avon Nightwatch operator console. See ARCHITECTURE.md for the design.",
 )
 
-# Pause between mock Sentinel steps so the UI can show them arriving one by one.
+# Pause between mock field-feed events so the UI can show them arriving one by one.
 # Tests set this to 0.
 MOCK_STEP_DELAY_S = 0.5
 
@@ -158,7 +159,7 @@ def get_series(
 
 
 # ---------------------------------------------------------------------------
-# Routes: mock until their phase lands
+# Routes: planning and Sentinel (real), and routes still mock until their phase lands (``_require_mock``)
 # ---------------------------------------------------------------------------
 
 
@@ -226,44 +227,37 @@ def export_events(
     responses={
         200: {
             "description": (
-                "Server-sent events, in order: 'step' events (one AgentStep each: triage, each specialist agent "
-                "with its AgentAssessment, the orchestrator, act), then one 'recommendation' event (the "
-                "orchestrator's Recommendation), then one 'drafts' event (list of DraftAction), then 'done' "
-                "({run_id, handoff})."
+                "Server-sent events, in order: 'step' events (one AgentStep each: index 0 triage; one per specialist "
+                "agent, first 'running' and then again with its final status and AgentAssessment, since they run in "
+                "parallel; the orchestrator, 'running' then 'done'; act). A step index can arrive twice: replace it "
+                "by index. Then one 'recommendation' event (the orchestrator's Recommendation), one 'drafts' event "
+                "(list of DraftAction, all pending) and 'done' ({run_id, handoff})."
             ),
             "content": {"text/event-stream": {}},
         }
     },
 )
-async def run_agent(ds: str) -> EventSourceResponse:
-    """Start a Sentinel run and stream its progress live (backend spec §11; T5.3).
+async def run_agent(
+    ds: str,
+    at: int | None = Query(default=None, description="Unix seconds to analyse (time machine). Omit for 'now'."),
+) -> EventSourceResponse:
+    """Start a Sentinel run and stream it live (ARCHITECTURE.md §11, Phase 7).
 
-    Use a fetch-based SSE reader in the frontend: browsers' EventSource only supports GET.
+    The specialist agents run in parallel, then the orchestrator decides and Nemotron explains; drafts wait for the
+    operator (nothing is dispatched here). Use a fetch-based SSE reader in the frontend: EventSource is GET-only.
     """
-    _dataset_path(ds)
-    _require_mock("T5.3")
-    run = mocks.mock_agent_run()
-
-    async def stream() -> AsyncIterator[dict[str, str]]:
-        """Yield the mock run step by step, pausing so the UI shows progress."""
-        for step in run.steps:
-            await asyncio.sleep(MOCK_STEP_DELAY_S)
-            yield {"event": "step", "data": step.model_dump_json()}
-        if run.recommendation is not None:
-            yield {"event": "recommendation", "data": run.recommendation.model_dump_json()}
-        yield {"event": "drafts", "data": json.dumps([d.model_dump() for d in run.drafts])}
-        yield {"event": "done", "data": json.dumps({"run_id": run.run_id, "handoff": run.handoff})}
-
-    return EventSourceResponse(stream())
+    d = _dataset(ds)
+    _, events = sentinel_service.start_run(d, at)
+    return EventSourceResponse(events)
 
 
 @app.get("/api/{ds}/agent/runs/{run_id}", response_model=AgentRunResult, tags=["sentinel"])
 def get_agent_run(ds: str, run_id: str) -> AgentRunResult:
-    """Fetch a finished Sentinel run (e.g. after a page reload) (T5.3)."""
-    _dataset_path(ds)
-    _require_mock("T5.3")
-    run = mocks.mock_agent_run()
-    run.run_id = run_id
+    """A finished Sentinel run (e.g. after a page reload): final steps, recommendation, drafts, handoff. 404 if unknown."""
+    d = _dataset(ds)
+    run = sentinel_service.get_run(d.id, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"No finished run '{run_id}' for dataset '{ds}'.")
     return run
 
 

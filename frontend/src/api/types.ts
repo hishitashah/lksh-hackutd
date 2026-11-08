@@ -95,9 +95,10 @@ export interface paths {
         put?: never;
         /**
          * Run Agent
-         * @description Start a Sentinel run and stream its progress live (backend spec §11; T5.3).
+         * @description Start a Sentinel run and stream it live (ARCHITECTURE.md §11, Phase 7).
          *
-         *     Use a fetch-based SSE reader in the frontend: browsers' EventSource only supports GET.
+         *     The specialist agents run in parallel, then the orchestrator decides and Nemotron explains; drafts wait for the
+         *     operator (nothing is dispatched here). Use a fetch-based SSE reader in the frontend: EventSource is GET-only.
          */
         post: operations["run_agent_api__ds__agent_run_post"];
         delete?: never;
@@ -115,7 +116,7 @@ export interface paths {
         };
         /**
          * Get Agent Run
-         * @description Fetch a finished Sentinel run (e.g. after a page reload) (T5.3).
+         * @description A finished Sentinel run (e.g. after a page reload): final steps, recommendation, drafts, handoff. 404 if unknown.
          */
         get: operations["get_agent_run_api__ds__agent_runs__run_id__get"];
         put?: never;
@@ -1867,7 +1868,10 @@ export interface operations {
     };
     run_agent_api__ds__agent_run_post: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Unix seconds to analyse (time machine). Omit for 'now'. */
+                at?: number | null;
+            };
             header?: never;
             path: {
                 ds: string;
@@ -1876,7 +1880,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Server-sent events, in order: 'step' events (one AgentStep each: triage, each specialist agent with its AgentAssessment, the orchestrator, act), then one 'recommendation' event (the orchestrator's Recommendation), then one 'drafts' event (list of DraftAction), then 'done' ({run_id, handoff}). */
+            /** @description Server-sent events, in order: 'step' events (one AgentStep each: index 0 triage; one per specialist agent, first 'running' and then again with its final status and AgentAssessment, since they run in parallel; the orchestrator, 'running' then 'done'; act). A step index can arrive twice: replace it by index. Then one 'recommendation' event (the orchestrator's Recommendation), one 'drafts' event (list of DraftAction, all pending) and 'done' ({run_id, handoff}). */
             200: {
                 headers: {
                     [name: string]: unknown;

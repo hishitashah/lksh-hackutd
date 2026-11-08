@@ -2497,7 +2497,7 @@
     },
     "/api/{ds}/agent/run": {
       "post": {
-        "description": "Start a Sentinel run and stream its progress live (backend spec §11; T5.3).\n\nUse a fetch-based SSE reader in the frontend: browsers' EventSource only supports GET.",
+        "description": "Start a Sentinel run and stream it live (ARCHITECTURE.md §11, Phase 7).\n\nThe specialist agents run in parallel, then the orchestrator decides and Nemotron explains; drafts wait for the\noperator (nothing is dispatched here). Use a fetch-based SSE reader in the frontend: EventSource is GET-only.",
         "operationId": "run_agent_api__ds__agent_run_post",
         "parameters": [
           {
@@ -2507,6 +2507,24 @@
             "schema": {
               "title": "Ds",
               "type": "string"
+            }
+          },
+          {
+            "description": "Unix seconds to analyse (time machine). Omit for 'now'.",
+            "in": "query",
+            "name": "at",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Unix seconds to analyse (time machine). Omit for 'now'.",
+              "title": "At"
             }
           }
         ],
@@ -2518,7 +2536,7 @@
               },
               "text/event-stream": {}
             },
-            "description": "Server-sent events, in order: 'step' events (one AgentStep each: triage, each specialist agent with its AgentAssessment, the orchestrator, act), then one 'recommendation' event (the orchestrator's Recommendation), then one 'drafts' event (list of DraftAction), then 'done' ({run_id, handoff})."
+            "description": "Server-sent events, in order: 'step' events (one AgentStep each: index 0 triage; one per specialist agent, first 'running' and then again with its final status and AgentAssessment, since they run in parallel; the orchestrator, 'running' then 'done'; act). A step index can arrive twice: replace it by index. Then one 'recommendation' event (the orchestrator's Recommendation), one 'drafts' event (list of DraftAction, all pending) and 'done' ({run_id, handoff})."
           },
           "422": {
             "content": {
@@ -2539,7 +2557,7 @@
     },
     "/api/{ds}/agent/runs/{run_id}": {
       "get": {
-        "description": "Fetch a finished Sentinel run (e.g. after a page reload) (T5.3).",
+        "description": "A finished Sentinel run (e.g. after a page reload): final steps, recommendation, drafts, handoff. 404 if unknown.",
         "operationId": "get_agent_run_api__ds__agent_runs__run_id__get",
         "parameters": [
           {
