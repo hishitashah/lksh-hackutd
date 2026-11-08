@@ -1,5 +1,14 @@
 # Avon Nightwatch: plan for EOG "Beat the Shutdown" + NVIDIA Nemotron
 
+> **Pitch:** Most consoles tell you what's broken. Nightwatch decides what to do, thinks one failure
+> ahead, proves its math, and gets the order to the field crew's phone, with a human approving every move.
+>
+> **What sets us apart:**
+> 1. **Long-run planning:** it plans for the *next* failure, not just this one.
+> 2. **Savings replay:** it shows in dollars what it would have saved on any week.
+> 3. **Sentinel:** an agent that acts, checks its own plans, and can't make up numbers.
+> 4. **Show your work:** every plan it rejected, with proof that the chosen one is the cheapest.
+
 ## Context
 
 HackUTD: ZeroDay, EOG Resources track. The repo is data only: `history/` folders, each holding
@@ -110,6 +119,7 @@ backend/nightwatch/
   optimize.py   exact plan search per system (joint over concurrent failures, shared fleet)
   alerts.py     alerts view ordering; lost revenue/h; countdown
   export.py     events.json (SPEC shape)
+  replay.py     savings replay: did nothing vs cheapest per event vs long run, over the whole window
   api.py        FastAPI routes
   agent/llm.py        ChatNVIDIA clients (Super + Nano), retries, response cache
   agent/tools.py      LangChain tools wrapping the modules above (the LLM never does math)
@@ -118,7 +128,7 @@ backend/nightwatch/
   agent/notify.py     ntfy.sh push + Discord webhook; scheduled reminders
 backend/scripts/score.py   DEV ONLY: compare detector/optimizer output with answer_key.json
 backend/tests/             pytest: sim reproduces EVENT_9; optimizer matches references
-frontend/src/  pages: Command, Field (mobile), Handoff, Training(stretch)
+frontend/src/  pages: Command, Field (mobile), Replay, Handoff, Training(stretch)
                components: Skyline, AlertList, CountdownRing, NetworkMap, PlanCard,
                ShowYourWork, TankWhatIf, TrendDrawer, TimeMachine, SentinelPanel, ApprovalQueue
 ```
@@ -188,6 +198,37 @@ Defaults keep "Cheapest now" exactly SPEC-optimal.
 - Rough math: about $905 + $905 + $3,384 vs $905 + ~$1,300 + $905, so **~$2,000 saved**.
 - In the time machine, you watch the payoff happen 30 minutes later.
 
+### Savings replay: "what Nightwatch would have saved"
+
+The telemetry is a recording of a week when **nobody acted**, so it already shows what doing nothing cost.
+The replay re-runs the whole week as if Nightwatch had been on shift. Each plan is made at the moment
+it would have been made, using only data up to that point, and trucks stay busy from earlier plans.
+
+It shows three totals side by side:
+
+| | What it means | History week (from the data) |
+|---|---|---|
+| **Did nothing** | Lost oil and gas sales from the automatic shut-ins in the recording | ≈ **$51,100** (17 facility-hours shut in) |
+| **Cheapest per event** | The SPEC-optimal plan for each failure | ≈ **$15,300** (70% saved) |
+| **Nightwatch long run** | Our long-run planner | Should beat cheapest per event (S2 Thursday alone saves ~$2,000). Use the real number from the sim |
+
+- **Why it stands out:** it turns the app into a business case ("this would have saved $35k+ this week"). It also proves the long-run planner across the whole week, not just one anecdote. It works live on `test/`: "on your new network, Nightwatch would have saved $X."
+- **How it helps the company:**
+  1. *Proves it's worth paying for:* any past week shows the dollars it would have saved.
+  2. *Builds operator trust:* operators watch it handle real past crises before relying on it live.
+  3. *Finds where money leaks:* the per-event breakdown shows the costliest facilities and pumps. E.g. S4_PUMP_C wore out, then failed twice in the history week: a replacement candidate, not a trucking problem.
+  4. *Supports spending decisions:* "would a 3rd truck in S2 pay for itself?" becomes a quick replay comparison.
+  5. *Tests changes safely:* try new prices, faster repairs or a bigger fleet on past weeks before changing the field.
+  - Pitch line: "It tells EOG what the problems cost, what Nightwatch would have saved, and where to invest next, using their own data."
+- **No answer key needed:** "did nothing" comes from the telemetry (wells at status 0 during a pump failure × revenue per hour). The other two come from our sim and optimizer.
+- **Cheap to build:** it reuses `optimize.py` in `at_onset_sequential` mode, which the scorer already needs.
+- **UI:** a `/replay` page.
+  - Three big numbers.
+  - A cumulative-cost chart over the week (three lines).
+  - A per-event table (date, facility, did nothing vs our plan, saved), where each row jumps the time machine to that moment.
+  - A shut-in hours bar per system.
+- **Sentinel task:** "Write the weekly ops review." Sentinel calls `run_replay`, picks the biggest wins and any events where the long-run choice cost more, explains them, and writes a one-page review.
+
 ### API
 - `GET /api/datasets`
 - `POST /api/datasets/upload` (the 3 files)
@@ -199,6 +240,7 @@ Defaults keep "Cheapest now" exactly SPEC-optimal.
 - `POST /api/{ds}/agent/run` (SSE steps)
 - `POST /api/{ds}/agent/approve`
 - `GET /api/{ds}/events.json?at=`
+- `GET /api/{ds}/replay?mode=cheapest|long_run` (savings replay: totals, per-event rows, cumulative series)
 
 Agree on the JSON shapes in Hour 1 so the frontend can build against mock data.
 
@@ -251,6 +293,7 @@ The UI streams each step as a visible trace with expandable tool calls.
 **Multi-step tasks operators can ask for:**
 - "Should we add a truck to S2?" → `run_scenario(fleet=2,3,4)` replays the week → cost saved vs truck cost, and a recommendation.
 - "What if S4's disposal site goes down for 4 h?" → scenario → every tank's countdown and the trucks needed.
+- "Write the weekly ops review." → `run_replay` → biggest savings, where the long-run choice cost more and why, and a one-page review.
 
 **Guardrails:**
 - Numbers come only from tool results. `grounding.py` pulls every $/%/time out of the answer and checks it against tool outputs, then shows a "✓ grounded" badge, or retries.
@@ -311,7 +354,15 @@ The UI streams each step as a visible trace with expandable tool calls.
   - Sentinel end to end on `snapshot_2026-10-08T1200`.
   - Frontend wired to the real API.
 - **H12–14:** full dry run on `mock_test_2026-10-10T1530`. **Freeze the core.**
-- **H14–20:** time machine, what-if, skyline, deck.gl truck animation, approvals + ntfy push, handoff, fleet-sizing task, `/field` phone view + PWA install (~30 min), dataset upload.
+- **H13–16 (P2's top priority after the core): long-run planner.**
+  - `assess_long_run`, the data for the "Cheapest now vs Best long run" cards, and the operator knobs.
+  - Verify the S2 Thursday scenario in the sim.
+  - It's our main differentiator, so build it **before** any skyline or animation polish.
+- **H16–18: savings replay.**
+  - P2: `replay.py` (reuses the optimizer).
+  - P4: `/replay` page.
+  - P3: the "weekly ops review" Sentinel task.
+- **H14–20 (P1, P3, P4 in parallel while P2 builds the above):** time machine, what-if, skyline, deck.gl truck animation, approvals + ntfy push, handoff, fleet-sizing task, `/field` phone view + PWA install (~30 min), dataset upload.
 - **H20–22:** bug bash, deploy, README with GIFs, Devpost, backup video.
   Start the judging-window Brev instance 30 min before judging and warm it up with one run.
 - **H22–24:** rehearse the pitch 3×. Sleep in shifts.
@@ -342,6 +393,10 @@ The UI streams each step as a visible trace with expandable tool calls.
 - Long run:
   - With the knobs at 0 and no at-risk pump, long-run = cheapest (pytest).
   - The S2 Thursday scenario reproduces a saving in the simulator. Put the real number in the pitch, not the rough estimate.
+- Savings replay:
+  - "Did nothing" total from telemetry ≈ $51,100 on full_week.
+  - "Cheapest per event" total = sum of the answer key's reference costs (≈ $15,300).
+  - "Long run" total ≤ cheapest, or the page explains each event where it cost more.
 - Branding check before each deploy:
   - `grep -ri "comic" frontend/ backend/` → no matches
   - `grep -ri "avon corps" frontend/ backend/` → no matches
@@ -350,6 +405,8 @@ The UI streams each step as a visible trace with expandable tool calls.
 
 EOG judges will ask why we built things the way we did. Every answer must be **our own reasoning, backed by our
 data or tests**. Don't cite mentors. Each owner practices their answers out loud, in 30 seconds or less.
+The results below (23/23, matches every reference, $ saved) are **targets**. Before judging, replace them with
+the numbers the scorer and replay actually produce. Never claim a number you haven't measured.
 
 | Question | Our answer | Who |
 |---|---|---|
@@ -367,6 +424,7 @@ data or tests**. Don't cite mentors. Each owner practices their answers out loud
 | Why a web app, not a native mobile app? | The control room uses big screens. The field gets an installable phone view (PWA) from the same codebase, and judges need no install | P4 |
 | Why this layout, and why the skyline? | Decision first ("do this now"), data second. The skyline makes lost revenue visible at a glance | P4 |
 | How does it handle a network it's never seen? | Every number comes from the 3 files. Dataset switcher + upload. Tested blind on the mock test, then live on `test/` | All |
+| How can you claim savings if nobody acted in the data? | That's why we can: the recording *is* the "did nothing" case. We replay the week with our plans, each made using only the data available at that moment, with trucks busy from earlier plans. Same simulator and rules as the live console | P2 |
 | What would you do with more time / in production? | Live sensor feeds instead of CSV, failure risk learned over many weeks, real road routing for trucks, operator feedback to tune thresholds | All |
 
 ## 3-minute demo
@@ -378,7 +436,10 @@ data or tests**. Don't cite mentors. Each owner practices their answers out loud
    Explain it in our own words: "We only hold a truck when the expected saving beats the extra cost now. Here's the math."
 4. **1:40 Sentinel.** The trace runs on its own. Judges scan the QR code, which opens the `/field` phone view.
    You approve on the console, and *their* phones buzz with the dispatch.
-5. **2:15 Proof.** Scorer slide (23/23, matches optimal on every snapshot). Switch to `test/` live.
+5. **2:15 Proof.**
+   - Scorer slide: 23/23, matches optimal on every snapshot.
+   - Savings replay: "Doing nothing cost $51k this week. Nightwatch: $15k or less."
+   - Switch to `test/` live and show its replay number.
 6. **2:45 Close.** "Built for the night shift." Show the handoff.
 
 ---
