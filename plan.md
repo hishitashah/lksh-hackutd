@@ -96,7 +96,8 @@ shut in. That turns the prompt's line "If no one intervenes, Avon goes dark" int
 | Skyline | SVG + Framer Motion | Light and easy to drive from state |
 | Client state | TanStack Query (server data), Zustand (selected asset, time-machine t) | Caching + refetch when t changes, plus a tiny global store |
 | Platform | Responsive **web app** + installable **PWA** (`vite-plugin-pwa`: web manifest, icons, service worker) | Big-screen console for the control room, plus a phone view for the field from one codebase. Judges open a link with no install. "Add to Home Screen" makes it launch full screen like a native app. A native app would cost build and install time that isn't scored |
-| Field notifications | ntfy.sh push (primary, random topic name), Discord webhook (log shown on screen) | Judges scan a QR code and get the dispatch on **their own phone**, no account needed. A Twilio trial only texts pre-verified numbers |
+| Field notifications | **Live `/field` page** fed by server-sent events (primary), ntfy.sh push (backup, random topic name), Discord webhook (log shown on screen) | Judges scan a QR code and see the dispatch appear on **their own phone** with no permissions or app. Real push alerts need app installs or permissions, so ntfy runs on a teammate's phone. A Twilio trial only texts pre-verified numbers |
+| Work orders | GitHub Issues REST API (a fine-grained token scoped to one repo) | A real external system Sentinel opens, de-duplicates and closes on its own. It stands in for a work-order tool like ServiceNow, and judges can open the issues |
 | Tooling | uv (Python), npm, pytest, ruff, eslint | uv installs fast on hackathon wifi. npm is already installed for everyone (pnpm wasn't), so there's no extra setup |
 | Deploy | Local run = primary demo. Backup: frontend on Vercel, backend Docker on Fly.io or Railway (always on) | Render's free tier sleeps, which means a 30–60 s cold start in front of judges |
 
@@ -240,6 +241,8 @@ It shows three totals side by side:
 - `POST /api/{ds}/agent/run` (SSE steps)
 - `POST /api/{ds}/agent/approve`
 - `GET /api/{ds}/events.json?at=`
+- `GET /api/{ds}/dispatches` (approved actions so far, for `/field` on page load)
+- `GET /api/{ds}/field/stream` (SSE over GET: each newly approved action, live)
 - `GET /api/{ds}/replay?mode=cheapest|long_run` (savings replay: totals, per-event rows, cumulative series)
 
 Agree on the JSON shapes in Hour 1 so the frontend can build against mock data.
@@ -273,6 +276,32 @@ Why the LLM doesn't watch the raw data:
 Trigger runs are debounced: one run per event change, cached per (dataset, event, t).
 The UI streams each step as a visible trace with expandable tool calls.
 
+### How Sentinel meets the NVIDIA track requirements
+
+| NVIDIA requirement | How Nightwatch meets it |
+|---|---|
+| **Uses Nemotron** | Super is the orchestrator, the referee, the borderline-alert reviewer and runs long tasks. Nano runs the three specialists, the evidence text and the handoff. Nano is self-hosted on NVIDIA Brev |
+| **Beyond a chatbot** | Sentinel starts **on its own** when the detector fires; nobody types a prompt. It runs in the background as the time machine plays. The chat box is optional |
+| **Multi-step workflows** | A 6-step graph whose Plan step is **multi-agent**: 3 specialists in parallel + a referee. Verify has a **self-correction loop**. Long tasks (fleet sizing, weekly review) are broken into many tool calls |
+| **Tool integration (external APIs, used intelligently)** | Internal tools (detector, optimizer, simulator) + external services: **GitHub Issues** as the work-order system (opens, de-duplicates and closes tickets itself), **ntfy** (pushes tailored to each role, plus scheduled reminders), Discord log. Stretch: OSRM road routing |
+| **Real-world applicability** | Produced-water operations like EOG's: dollar impact, field crews, and a human approves every field action |
+
+### Agent graph (one run per system; systems run in parallel)
+
+```
+Triage → Investigate ─→ Cost (exact Python optimizer + long-run check)
+                          │
+             ┌────────────┼──────────────┐       all three in parallel (Nemotron Nano)
+       Feasibility    Production    Safety & environment
+             └────────────┼──────────────┘
+                          ▼
+                 Referee (Nemotron Super) → Verify ──fails?──┐ (retry with the reason, max 2,
+                          ▲                                  │  then escalate to the operator)
+                          └──────────────────────────────────┘
+                          ▼ passes
+                 Act (approval queue → GitHub Issues, ntfy, Discord) → Report
+```
+
 1. **Triage:** `list_active_alerts(at)` → pick the highest risk and say why.
 2. **Investigate:** `get_readings(asset, metrics, window)`, `compare_to_baseline(asset)`.
    Confirm the category (leak vs wear: is the flow balance normal?) and write the evidence. Uses Nano.
@@ -280,15 +309,46 @@ The UI streams each step as a visible trace with expandable tool calls.
    Sentinel (Super) checks the related sensors and decides **raise now** or **keep watching**, with a reason
    ("discharge down 6 psi over 3 h of pumping, flow balance normal → likely wear, raising at 62%").
    This cuts false alarms and gives Nemotron a real part in detection. The detector still owns the numbers.
-3. **Plan:** `get_fleet_status(system, at)`, `optimize_plan(system, at)` (cheapest now),
-   `assess_long_run(system, plan)` (reserve risk + expected saving). Uses Super.
-   When the two differ, Sentinel explains the trade-off in plain English and recommends one.
-4. **Verify:** `simulate_plan(facility, plan)` → peak level stays under shutdown, compared against doing nothing.
-   If the check fails, re-plan with constraints or escalate to the operator.
-5. **Act (operator approves):** `draft_truck_dispatch`, `schedule_shut_in(well, at)`, `open_inspection_ticket(asset, evidence)`
-   go into the **Approval queue** (a LangGraph `interrupt()`). On approve, `notify_field_crew` sends an
-   ntfy push (to judges' phones by QR) + a Discord log, and sets a reminder (e.g. "Shut in S4_WELL_A2 at 12:51").
-6. **Report:** `write_handoff()` → a 30-second shift handoff + `events.json`.
+3. **Plan (multi-agent, from the team whiteboard):**
+   - **Cost (core, exact Python, no LLM):** `optimize_plan(system, at)` returns cheapest now + alternatives +
+     do nothing. `assess_long_run(system, plan)` returns the reserve risk and expected saving.
+   - **Three specialist agents, run in parallel (Nemotron Nano).** Each scores every candidate plan, using only its own tools:
+     - **Feasibility:** `get_fleet_status`, `simulate_plan`. Can it actually be done (trucks free, arrival
+       before the tank trips, before the repair ends)?
+     - **Production:** `get_production_impact(plan)`. Barrels of oil and mcf of gas lost, and from which wells
+       (rates from `network.json`).
+     - **Safety & environment:**
+       - `estimate_spill(asset)`: for leaks, salt water spilled so far = missing flow × hours, from telemetry.
+         A real, reportable number that raises urgency.
+       - `get_truck_exposure(plan)`: night trips and drive distance from the yard (coordinates in `network.json`).
+       - Explains the risk to people, animals and land in plain words. Every number comes from tools.
+   - **Referee agent (Nemotron Super):** weighs the cost result and the three assessments, then picks **one of the
+     optimizer's plans** (it can never invent one). If the pick isn't the cheapest, it states the extra cost and why.
+   - **Scale:**
+     - One Sentinel run per system, all in parallel, because systems don't share trucks.
+     - Inside a system, the referee plans simultaneous failures together, because they share the fleet
+       (the board's "domino effect").
+4. **Verify (self-correcting):** `simulate_plan(facility, plan)` checks the peak stays under shutdown and compares
+   against doing nothing, then the grounding check runs. If either fails, the graph loops back to the referee
+   with the reason (max 2 retries), then escalates to the operator. The retry is visible in the trace.
+5. **Act (operator approves):** drafted actions go into the **Approval queue** (a LangGraph `interrupt()`).
+   Draft tools: `draft_truck_dispatch`, `schedule_shut_in(well, at)`, `create_work_order(asset, evidence, priority)`.
+   On approve:
+   - **GitHub Issues = the work-order system.** One issue per leak or worn pump, with the evidence.
+     Sentinel searches for an open issue on the same asset first and comments on it instead of duplicating,
+     then closes it itself when the detector marks the event resolved.
+   - **Live `/field` feed:** the approved action is added to the dispatch list and streamed to every open
+     `/field` page (`GET /api/{ds}/field/stream`). This is what judges see on their own phones.
+   - **ntfy pushes tailored to each role** (real phone notifications, e.g. on a teammate's phone with the ntfy app):
+     - The driver gets the facility, the trips and the ETA. The inspector gets the evidence.
+     - Scheduled reminders use ntfy's delayed delivery, e.g. "Shut in S2_WELL_C1 at 12:46".
+     - In the demo, scale the delay to the time-machine speed.
+   - **Discord log** shown on screen.
+6. **Report:** `write_handoff()` → a 30-second shift handoff + `events.json`. Uses Nano.
+
+**Stretch external services (display or advice only; never changes a cost):**
+- **OSRM** road routes from the truck yard to the facility, for the truck animation.
+- **Weather** (Open-Meteo) at the facility: flags conditions that could slow night trucking, as a note to the operator.
 
 **Multi-step tasks operators can ask for:**
 - "Should we add a truck to S2?" → `run_scenario(fleet=2,3,4)` replays the week → cost saved vs truck cost, and a recommendation.
@@ -297,6 +357,8 @@ The UI streams each step as a visible trace with expandable tool calls.
 
 **Guardrails:**
 - Numbers come only from tool results. `grounding.py` pulls every $/%/time out of the answer and checks it against tool outputs, then shows a "✓ grounded" badge, or retries.
+- The referee can only choose among plans the optimizer produced. "Cheapest now" is always shown, so the EOG optimality check never depends on the LLM.
+- External actions (GitHub, ntfy, Discord) run only after operator approval, except closing a work order whose event the detector has marked resolved.
 - Low temperature for tool calls.
 - The console works fully with no LLM. Cache agent results per (dataset, at, prompt), and handle rate limits.
 
@@ -320,8 +382,17 @@ The UI streams each step as a visible trace with expandable tool calls.
 - **`/field` (phone view, installable PWA):** for an inspector or truck driver standing at a tank.
   - One card per alert: big countdown, the action to take, an approve button.
   - Large tap targets.
-  - The QR code on the console opens `/field` and subscribes to the ntfy push topic.
-  - PWA install needs HTTPS, so phones use the deployed URL (or a tunnel like `cloudflared` to the laptop), not `localhost`.
+  - **Live dispatch feed (the main demo path).** When the operator approves an action on the console, a big
+    card appears on every open `/field` page within about a second, e.g. "Truck 1 → S2_FACILITY_B, arrives ~13:10".
+    - No permissions, no app, no install: it works in any phone browser.
+    - Uses `GET /api/{ds}/field/stream` (server-sent events over GET, so the browser's built-in `EventSource`
+      works and reconnects on its own) plus `GET /api/{ds}/dispatches` for the list when the page opens.
+    - The newest card slides in and briefly flashes. Android phones also vibrate (`navigator.vibrate`);
+      iPhones ignore that, which is fine.
+  - The QR code on the console just opens `/field`. Judges scan it and watch orders arrive as you approve.
+  - Phones can't reach `localhost`: use the deployed URL, or a tunnel like `cloudflared` to the laptop.
+    PWA install additionally needs HTTPS (both options provide it).
+  - ntfy is the **backup**: a teammate's phone with the ntfy app sits on the table and buzzes for real.
 - **Stretch:** Training mode (replay a crisis, the player decides against a clock, graded against the optimizer).
 
 ---
@@ -330,7 +401,7 @@ The UI streams each step as a visible trace with expandable tool calls.
 
 | Person | Owns |
 |---|---|
-| P1 Data | `data.py`, `detect.py`, the detection half of `score.py`, evidence/confidence |
+| P1 Data | `data.py`, `detect.py`, the detection half of `score.py`, evidence/confidence. After the H12 freeze: Sentinel's specialist tools (T5.10) |
 | P2 Algorithms | `sim.py`, `optimize.py`, `alerts.py`, the plan half of `score.py`, `/simulate` |
 | P3 Agent + API + pitch | `api.py`, `agent/*`, notify, grounding, Devpost, pitch |
 | P4 Frontend/UX | the React app, map, charts, skyline, time machine, mobile. P3 helps on the Sentinel panel |
@@ -362,7 +433,7 @@ The UI streams each step as a visible trace with expandable tool calls.
   - P2: `replay.py` (reuses the optimizer).
   - P4: `/replay` page.
   - P3: the "weekly ops review" Sentinel task.
-- **H14–20 (P1, P3, P4 in parallel while P2 builds the above):** time machine, what-if, skyline, deck.gl truck animation, approvals + ntfy push, handoff, fleet-sizing task, `/field` phone view + PWA install (~30 min), dataset upload.
+- **H14–20 (P1, P3, P4 in parallel while P2 builds the above):** time machine, what-if, skyline, deck.gl truck animation, approvals + live `/field` feed (+ ntfy backup), handoff, fleet-sizing task, `/field` phone view + PWA install (~30 min), dataset upload.
 - **H20–22:** bug bash, deploy, README with GIFs, Devpost, backup video.
   Start the judging-window Brev instance 30 min before judging and warm it up with one run.
 - **H22–24:** rehearse the pitch 3×. Sleep in shifts.
@@ -389,7 +460,10 @@ The UI streams each step as a visible trace with expandable tool calls.
   - Chrome Lighthouse marks the deployed URL "installable".
   - On a real phone (iPhone + Android if possible): scan the QR code, add to home screen, and it opens full screen.
   - `/field` is usable at 375 px wide.
-  - An approval on the console triggers a push on the phone.
+  - An approval on the console makes the card appear on `/field` within ~1 s on both an iPhone and an Android
+    phone, with no permissions granted.
+  - Turning the phone's Wi-Fi off and on: the feed reconnects and shows anything approved meanwhile.
+  - Backup: the teammate's ntfy phone buzzes on the same approval.
 - Long run:
   - With the knobs at 0 and no at-risk pump, long-run = cheapest (pytest).
   - The S2 Thursday scenario reproduces a saving in the simulator. Put the real number in the pitch, not the rough estimate.
@@ -419,7 +493,9 @@ the numbers the scorer and replay actually produce. Never claim a number you hav
 | What makes Sentinel more than a chatbot? | It starts on its own from detector events, runs 6 steps with tools, checks its plan in the simulator, waits for approval, then acts (push to the field crew) and writes the handoff | P3 |
 | How do you stop the AI from making up numbers? | Numbers only come from tool results. A grounding check rejects any number that isn't in a tool output, and the UI shows a badge | P3 |
 | Why self-host Nano on Brev but not Super? | Nano gets the most calls and fits on one GPU, which removes rate limits. Super needs several GPUs and would use up the credits, and it's called far less, so the hosted API is fine | P3 |
-| Why LangGraph? | Its graph maps one-to-one onto our 6 steps, it streams each step to the UI, and it has a built-in pause for human approval | P3 |
+| Why LangGraph? | Its graph maps one-to-one onto our 6 steps, runs the three specialists in parallel, supports the Verify→Referee retry loop, streams each step to the UI, and has a built-in pause for human approval | P3 |
+| Why several agents instead of one? | Each specialist looks at one thing (feasibility, production, safety) with only its own tools, so its reasoning stays focused and checkable. The referee makes the trade-off in one visible place. The cost math stays in exact Python | P3 |
+| Why can't the referee make up its own plan? | Optimality is judged. Only the optimizer's plans are guaranteed valid and correctly costed, so the referee chooses among them and must justify any pick that isn't the cheapest | P3 |
 | Why does a person have to approve? | Trucks and shut-ins cost real money and affect field safety. The agent drafts, a person decides, and one tap keeps it fast | P3 |
 | Why a web app, not a native mobile app? | The control room uses big screens. The field gets an installable phone view (PWA) from the same codebase, and judges need no install | P4 |
 | Why this layout, and why the skyline? | Decision first ("do this now"), data second. The skyline makes lost revenue visible at a glance | P4 |
@@ -434,8 +510,11 @@ the numbers the scorer and replay actually produce. Never claim a number you hav
 3. **1:15 What-if + long run.** The replay shows the tank staying under the line.
    Then the S2 Thursday moment: Sentinel spends a bit more to hold a truck, and 30 min later another pump fails and that truck saves it.
    Explain it in our own words: "We only hold a truck when the expected saving beats the extra cost now. Here's the math."
-4. **1:40 Sentinel.** The trace runs on its own. Judges scan the QR code, which opens the `/field` phone view.
-   You approve on the console, and *their* phones buzz with the dispatch.
+4. **1:40 Sentinel.** The trace runs on its own.
+   - The three specialists light up side by side, then the referee gives its verdict.
+   - Judges scan the QR code, which opens the `/field` phone view.
+   - You approve on the console, and the dispatch appears on *their* phones within a second, while a
+     teammate's phone buzzes (ntfy) and a GitHub work order opens for the leak.
 5. **2:15 Proof.**
    - Scorer slide: 23/23, matches optimal on every snapshot.
    - Savings replay: "Doing nothing cost $51k this week. Nightwatch: $15k or less."

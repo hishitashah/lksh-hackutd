@@ -69,6 +69,15 @@ class Settings(BaseSettings):
     ntfy_topic: str | None = Field(default=None, description="ntfy.sh topic for phone pushes. Use a random name.")
     discord_webhook_url: str | None = Field(default=None, description="Discord webhook for the on-screen dispatch log.")
 
+    # --- Work orders on GitHub Issues (M5, T5.13) -----------------------------
+    github_token: str | None = Field(
+        default=None,
+        description="Fine-grained GitHub token with Issues read/write on github_repo only. Never commit it.",
+    )
+    github_repo: str | None = Field(
+        default=None, description="Repo that holds work orders, as 'owner/name' (e.g. a separate demo repo)."
+    )
+
     @property
     def data_dir_list(self) -> list[str]:
         """``data_dirs`` split into a clean list, e.g. ['history', 'test']."""

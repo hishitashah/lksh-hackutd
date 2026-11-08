@@ -112,7 +112,9 @@ The answer keys are read **only** by `score.py` and tests, never by the app.
 | T4.2 | `POST /datasets/upload` (3 files) | T1.1 | Uploading the mock_test files gives the same results as loading the folder |
 | T4.3 | `events.json` export (SPEC shape) | T2.6, T3.4 | Validates against the SPEC example's fields |
 
-## M5: Sentinel (P3, H2–18)
+## M5: Sentinel (P3, H2–18; P1 joins after the H12 freeze)
+
+This is the NVIDIA track work. See plan.md "How Sentinel meets the NVIDIA track requirements" and "Agent graph".
 
 | ID | Task | Depends | Done when |
 |---|---|---|---|
@@ -120,11 +122,16 @@ The answer keys are read **only** by `score.py` and tests, never by the app.
 | T5.2 | `tools.py`: each tool wraps a P1/P2 function (mocks first), with a clear docstring + JSON output | T0.3 | pytest: every tool returns valid JSON |
 | T5.3 | LangGraph: 6 steps, streamed to the UI over SSE | T5.2 | On `snapshot_2026-10-08T1200`: all 6 steps stream and the run ends with drafts in the approval queue |
 | T5.4 | Grounding check | T5.3 | A planted fake number gets rejected and retried |
-| T5.5 | Approval (`interrupt()`) → ntfy push + Discord log | T5.3 | Approve on the console → a real phone gets the push |
+| T5.5 | Approval (`interrupt()`) → (1) add to the dispatch list and stream it on `GET /api/{ds}/field/stream` (SSE over GET) + `GET /api/{ds}/dispatches`; (2) ntfy pushes tailored to each role (driver: facility, trips, ETA; inspector: evidence) + scheduled reminders (ntfy delayed delivery, scaled to the time-machine speed in the demo); (3) Discord log | T5.3 | Approve on the console → the order appears on an open `/field` page within ~1 s, and the teammate's ntfy phone buzzes. A shut-in reminder arrives at its scheduled time |
 | T5.6 | Watcher trigger + debounce + cache | T2.5, T5.3 | The time machine crossing one onset triggers exactly one run |
 | T5.7 | Borderline-alert review (raise now / keep watching) | T2.6 | An early worn-pump signal gets a decision with a reason |
 | T5.8 | Nano on Brev + automatic fallback to hosted | T5.1 | Stopping the Brev instance mid-run still finishes the run |
 | T5.9 | Multi-step tasks: fleet sizing, disposal-down scenario, weekly ops review | T3.7 | Each returns a grounded answer |
+| T5.10 | **P1, after H12:** specialist tools, pure Python with no LLM: `get_production_impact(plan)` (oil bbl, gas mcf lost by well), `estimate_spill(asset)` (missing flow × hours for leaks), `get_truck_exposure(plan)` (night trips, yard→facility distance) | T2.3, T3.4 | pytest: each matches a hand calculation on one event. Every value comes from the 3 files |
+| T5.11 | **Multi-agent Plan step:** 3 specialist agents in parallel (Nano) + referee (Super) that picks one of the optimizer's plans. One run per system, systems in parallel | T5.3, T5.10 | `snapshot_2026-10-08T1200`: three specialists stream side by side, the referee picks a plan from the optimizer's list and states the extra cost if it isn't the cheapest |
+| T5.12 | **Self-correction loop:** if the referee's pick fails `simulate_plan` or grounding, loop back with the reason (max 2), then escalate | T5.4, T5.11 | A deliberately failing plan triggers one visible retry in the trace |
+| T5.13 | **Work orders on GitHub Issues:** `create_work_order` opens an issue with evidence + priority, comments instead of duplicating, closes it when the detector marks the event resolved | T5.3, T2.5 | Playing the time machine across a leak opens exactly one issue and closes it when the leak ends |
+| T5.14 | *Stretch:* OSRM road route from yard to facility for the truck animation (display only), and a weather note for night trucking | T6.13 | Route drawn on the map. The note appears and never changes a cost |
 
 ## M6: Frontend (P4, H1–20)
 
@@ -138,9 +145,9 @@ The answer keys are read **only** by `score.py` and tests, never by the app.
 | T6.6 | Trend drawer (ECharts): any sensor, overlays, event shading | T1.2 | Click any asset → its charts |
 | T6.7 | What-if tank chart (do nothing vs plan, limit lines from `network.json`) | T3.1 | EVENT_9 shows the do-nothing line hitting the limit and the plan line staying under |
 | T6.8 | Time machine (scrub + play) | T2.5 | Everything updates as of t, smoothly |
-| T6.9 | Sentinel panel: live steps, tool calls, approval queue, chat (with P3) | T5.3 | Shows a full run from start to approval |
+| T6.9 | Sentinel panel: live steps, tool calls, the three specialists side by side + the referee's verdict, visible retries, approval queue, links to GitHub work orders, chat (with P3) | T5.3, T5.11 | Shows a full multi-agent run from start to approval |
 | T6.10 | `/replay` page: 3 totals, cumulative chart, per-event table (rows jump the time machine) | T3.7 | Totals equal the API's |
-| T6.11 | `/field` phone view + PWA install + QR code | T5.5 | Installs on a real phone and is usable at 375 px |
+| T6.11 | `/field` phone view: **live dispatch feed** (browser `EventSource` on `/field/stream`, initial list from `/dispatches`, new card slides in + flashes, vibrate on Android) + PWA install + QR code on the console | T5.5 | On a real iPhone and Android phone with no permissions: an approval shows up within ~1 s. Survives a Wi-Fi drop. Installs as a PWA and is usable at 375 px |
 | T6.12 | Skyline + lost-$ ticker | T2.5 | Districts dim on shut-in |
 | T6.13 | Truck animation (deck.gl `TripsLayer`) | T3.4 | Trucks move on approved plans |
 
@@ -152,21 +159,25 @@ The answer keys are read **only** by `score.py` and tests, never by the app.
 |---|---|---|
 | **H6** | Thin slice | `snapshot_2026-10-08T1200`: a pump failure shows in the UI from the real API, with countdown + cheapest plan + a Sentinel explanation |
 | **H12** | Core correct + blind dry run | Scorer green on full_week + 3 snapshots. Mock test run blind with no crash. **Freeze the core** |
-| **H18** | Differentiators | Long-run cards, replay totals and Sentinel approval → phone push all work |
+| **H18** | Differentiators | Long-run cards, replay totals, the multi-agent Plan step, approval → live `/field` feed on a real phone (+ ntfy backup) and GitHub work orders all work |
 | **H20** | Feature freeze | Deployed. Branding grep clean. One full demo rehearsal |
 
 ## If we fall behind, cut in this order
 
 1. Training mode
-2. Truck animation (T6.13)
-3. Discord log (keep ntfy)
-4. Disposal-down scenario
-5. Borderline-alert review (T5.7)
-6. Skyline flicker details (keep simple on/off)
+2. OSRM routes + weather note (T5.14)
+3. Truck animation (T6.13)
+4. Discord log (keep ntfy)
+5. Disposal-down scenario
+6. Self-correction loop (T5.12): keep simple escalation
+7. Borderline-alert review (T5.7)
+8. Skyline flicker details (keep simple on/off)
 
 **Never cut:**
 - the correct core (M1–M3 through T3.5)
 - the long-run planner (T3.6)
 - the savings replay (T3.7)
 - Sentinel's main flow (T5.1–T5.5)
+- the multi-agent Plan step (T5.10–T5.11): it's the NVIDIA centerpiece
+- GitHub work orders (T5.13): the clearest external-tool integration
 - the dataset switcher/upload
