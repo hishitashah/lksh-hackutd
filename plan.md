@@ -79,12 +79,14 @@ shut in. That turns the prompt's line "If no one intervenes, Avon goes dark" int
 | API | FastAPI + pydantic, SSE via `sse-starlette` | Serves the Python engine directly. Pydantic → OpenAPI → generated TS types (`openapi-typescript`), so 4 people never drift on the contract. SSE streams the agent's steps live |
 | Agent | LangGraph + `langchain-nvidia-ai-endpoints` (`ChatNVIDIA`) | NVIDIA's own integration for build.nvidia.com models, with tool calling. LangGraph gives an explicit step graph (= the 6-step Sentinel workflow), per-step streaming, and built-in human-in-the-loop `interrupt()` for the approval queue. Fallback: plain `openai` SDK on the same endpoint. Ask NVIDIA mentors whether NeMo Agent Toolkit (works with LangGraph) earns extra credit |
 | Models | Nemotron 3 Super (orchestrator + tool calls), Nemotron 3 Nano (fast evidence/handoff text) | Super for multi-step reasoning, Nano for cheap, low-latency summaries |
+| GPU hosting | **NVIDIA Brev** ($60 credits per member): self-host Nemotron 3 Nano on one GPU with vLLM (FP8 build, or NVIDIA's ready-made Brev launchable, which uses the NVFP4 build). Super stays on the hosted build.nvidia.com API | Nano gets the most calls (evidence, borderline reviews, handoffs), so self-hosting removes free-tier rate limits and latency spikes during the demo. vLLM serves the same OpenAI-compatible API, so switching is one `base_url` setting. Super (120B) needs several GPUs and would burn the credits fast |
 | Frontend | React + TypeScript + Vite | Aesthetics are judged, and a custom animated UI (skyline, time machine, map) is what stands out. Streamlit/Dash would be faster but look like every other team's. No SSR needed, so Vite over Next.js |
 | UI kit | Tailwind + shadcn/ui | Polished dark-mode components in minutes, with full control over the cyberpunk look. Font: team decides later (never Comic Sans) |
 | Map | deck.gl on MapLibre (`react-map-gl`), CARTO dark-matter basemap (no token) | GPU layers for glowing pipelines with animated flow and trucks moving along routes (`TripsLayer`). Far stronger visually than Leaflet markers |
 | Charts | Apache ECharts (`echarts-for-react`) | Smooth with 2k-point series. Built-in zoom, limit lines, shaded event bands, dark theme |
 | Skyline | SVG + Framer Motion | Light and easy to drive from state |
 | Client state | TanStack Query (server data), Zustand (selected asset, time-machine t) | Caching + refetch when t changes, plus a tiny global store |
+| Platform | Responsive **web app** + installable **PWA** (`vite-plugin-pwa`: web manifest, icons, service worker) | Big-screen console for the control room, plus a phone view for the field from one codebase. Judges open a link with no install. "Add to Home Screen" makes it launch full screen like a native app. A native app would cost build and install time that isn't scored |
 | Field notifications | ntfy.sh push (primary, random topic name), Discord webhook (log shown on screen) | Judges scan a QR code and get the dispatch on **their own phone**, no account needed. A Twilio trial only texts pre-verified numbers |
 | Tooling | uv (Python), pnpm, pytest, ruff | Fast installs on hackathon wifi |
 | Deploy | Local run = primary demo. Backup: frontend on Vercel, backend Docker on Fly.io or Railway (always on) | Render's free tier sleeps, which means a 30–60 s cold start in front of judges |
@@ -94,6 +96,11 @@ shut in. That turns the prompt's line "If no one intervenes, Avon goes dark" int
   Slugs: `nvidia/nemotron-3-super-120b-a12b`, `nvidia/nemotron-3-nano-30b-a3b`.
   **Hour 0:** check them with `GET /v1/models`, fall back to whichever Nemotron models are listed,
   and check the model card for tool calling and the reasoning on/off switch.
+- **Brev budget ($60 × 4 members):**
+  - Check the GPU hourly price on brev.nvidia.com first, and pick the smallest GPU that fits the Nano build you use.
+  - **Stop the instance whenever it's idle.** It bills while running.
+  - Use one member's credits for development. Keep another member's untouched for the judging window.
+  - Settings: `NANO_BASE_URL` / `SUPER_BASE_URL`. If Brev fails, fall back to the hosted API automatically.
 
 ```
 backend/nightwatch/
@@ -138,9 +145,10 @@ frontend/src/  pages: Command, Field (mobile), Handoff, Training(stretch)
   - Return the best plan + the top 5 alternatives + the do-nothing cost, which feed the "Show your work" panel.
   - Two modes: `from_now` (snapshots, live), and `at_onset_sequential` (to reproduce the full-week references, with trucks busy from earlier plans).
 
-### Cheapest now vs best in the long run (EOG mentor feedback)
+### Cheapest now vs best in the long run (our design decision)
 
-EOG mentors said a more expensive plan is fine **if you can justify it** and it's better in the long run.
+Planning one event at a time can be short-sighted: it can spend a system's last truck right before
+the next pump fails. We show both answers and back the long-run one with numbers from the data.
 So every pump failure gets two answers:
 
 1. **Cheapest now:** the exact SPEC optimum.
@@ -265,7 +273,12 @@ The UI streams each step as a visible trace with expandable tool calls.
   - **What-if tank chart** (do nothing vs the plan, limit lines from network.json)
 - **Bottom:** **Time machine** scrubber over the telemetry range, with play at 60× / 600×. Everything recomputes as of t.
 - **Sentinel panel:** step trace, tool calls, approval queue, chat box.
-- **Other views:** asset trend drawer (multi-sensor overlay, event shading), `/field` mobile view, `/handoff` page.
+- **Other views:** asset trend drawer (multi-sensor overlay, event shading), `/handoff` page.
+- **`/field` (phone view, installable PWA):** for an inspector or truck driver standing at a tank.
+  - One card per alert: big countdown, the action to take, an approve button.
+  - Large tap targets.
+  - The QR code on the console opens `/field` and subscribes to the ntfy push topic.
+  - PWA install needs HTTPS, so phones use the deployed URL (or a tunnel like `cloudflared` to the laptop), not `localhost`.
 - **Stretch:** Training mode (replay a crisis, the player decides against a clock, graded against the optimizer).
 
 ---
@@ -290,6 +303,7 @@ The UI streams each step as a visible trace with expandable tool calls.
   - Detector v1 (failures + leaks).
   - Simulator reproduces the EVENT_9 numbers ($905 / $1,958 / ~$5,016, trip 04:49).
   - Nemotron tool-call hello world.
+  - P3: Nano running on Brev (launchable or vLLM), switchable with the hosted API by `base_url`.
   - UI shell on mock JSON.
 - **H6–12:**
   - Scorer: 23/23 on full_week.
@@ -297,8 +311,9 @@ The UI streams each step as a visible trace with expandable tool calls.
   - Sentinel end to end on `snapshot_2026-10-08T1200`.
   - Frontend wired to the real API.
 - **H12–14:** full dry run on `mock_test_2026-10-10T1530`. **Freeze the core.**
-- **H14–20:** time machine, what-if, skyline, deck.gl truck animation, approvals + ntfy push, handoff, fleet-sizing task, mobile view, dataset upload.
+- **H14–20:** time machine, what-if, skyline, deck.gl truck animation, approvals + ntfy push, handoff, fleet-sizing task, `/field` phone view + PWA install (~30 min), dataset upload.
 - **H20–22:** bug bash, deploy, README with GIFs, Devpost, backup video.
+  Start the judging-window Brev instance 30 min before judging and warm it up with one run.
 - **H22–24:** rehearse the pitch 3×. Sleep in shifts.
 
 ---
@@ -316,7 +331,14 @@ The UI streams each step as a visible trace with expandable tool calls.
 - Agent:
   - 5 canned prompts per snapshot → correct tool sequence and grounded badge.
   - Remove the API key → the console still works.
+  - Flip Nano's `base_url` between Brev and hosted → same behavior.
+  - Stop the Brev instance mid-run → it falls back to hosted.
 - At judging: drop in `test/`, pick it in the switcher, check it loads in under 10 s, then demo.
+- Phone / PWA:
+  - Chrome Lighthouse marks the deployed URL "installable".
+  - On a real phone (iPhone + Android if possible): scan the QR code, add to home screen, and it opens full screen.
+  - `/field` is usable at 375 px wide.
+  - An approval on the console triggers a push on the phone.
 - Long run:
   - With the knobs at 0 and no at-risk pump, long-run = cheapest (pytest).
   - The S2 Thursday scenario reproduces a saving in the simulator. Put the real number in the pitch, not the rough estimate.
@@ -324,16 +346,40 @@ The UI streams each step as a visible trace with expandable tool calls.
   - `grep -ri "comic" frontend/ backend/` → no matches
   - `grep -ri "avon corps" frontend/ backend/` → no matches
 
+## Defend every decision (judges will ask "why")
+
+EOG judges will ask why we built things the way we did. Every answer must be **our own reasoning, backed by our
+data or tests**. Don't cite mentors. Each owner practices their answers out loud, in 30 seconds or less.
+
+| Question | Our answer | Who |
+|---|---|---|
+| Why rules + statistics instead of ML for detection? | Only 23 labelled events, and judging uses an unseen network. ML would overfit to S1–S5. Rules built on how the equipment behaves (flow in vs flow out, pressure) carry over to any network and produce plain-English evidence. Result: 23/23, 0 false alarms | P1 |
+| How did you set thresholds without overfitting? | Thresholds are multiples of each asset's own measured noise and baseline, learned from whatever dataset is loaded. None are tuned to specific S1–S5 assets. Tested blind on the mock test | P1 |
+| How do you know the plan is really the cheapest? | We try every valid plan (trucks × trips × wells × start times). The space is small, so the search is exhaustive. It matched the reference cost on every labelled event and snapshot | P2 |
+| Why not an optimization solver (MILP)? | At this size, exhaustive search is exact, runs in milliseconds, and lets us show every rejected plan. A solver adds setup and hides the reasoning. We'd switch if the fleet and facility count grew by orders of magnitude | P2 |
+| Why ever recommend spending more than the cheapest plan? | Planning one event at a time can spend the last truck right before the next failure. In the data, failures clustered (2–3 within an hour in three systems), and 4 of 5 worn pumps later failed. We only suggest it when the expected saving beats the extra cost, we show both plans, and the cheapest stays the default | P2 / P3 |
+| Why not let the AI detect problems or do the math? | Exactness (optimality is judged), data size (~393k rows), speed (the time machine needs milliseconds) and reliability (the console works with no API). The AI does what code can't: investigate, weigh options, explain, draft actions | P3 |
+| What makes Sentinel more than a chatbot? | It starts on its own from detector events, runs 6 steps with tools, checks its plan in the simulator, waits for approval, then acts (push to the field crew) and writes the handoff | P3 |
+| How do you stop the AI from making up numbers? | Numbers only come from tool results. A grounding check rejects any number that isn't in a tool output, and the UI shows a badge | P3 |
+| Why self-host Nano on Brev but not Super? | Nano gets the most calls and fits on one GPU, which removes rate limits. Super needs several GPUs and would use up the credits, and it's called far less, so the hosted API is fine | P3 |
+| Why LangGraph? | Its graph maps one-to-one onto our 6 steps, it streams each step to the UI, and it has a built-in pause for human approval | P3 |
+| Why does a person have to approve? | Trucks and shut-ins cost real money and affect field safety. The agent drafts, a person decides, and one tap keeps it fast | P3 |
+| Why a web app, not a native mobile app? | The control room uses big screens. The field gets an installable phone view (PWA) from the same codebase, and judges need no install | P4 |
+| Why this layout, and why the skyline? | Decision first ("do this now"), data second. The skyline makes lost revenue visible at a glance | P4 |
+| How does it handle a network it's never seen? | Every number comes from the 3 files. Dataset switcher + upload. Tested blind on the mock test, then live on `test/` | All |
+| What would you do with more time / in production? | Live sensor feeds instead of CSV, failure risk learned over many weeks, real road routing for trucks, operator feedback to tune thresholds | All |
+
 ## 3-minute demo
 
 1. **0:00 Hook.** "Saturday, 7 AM, Avon. Three S4 pumps fail within an hour. Two trucks." The skyline district flickers.
 2. **0:30 Plan.** The alerts are in order. Open the top one: decision banner + Show your work.
 3. **1:15 What-if + long run.** The replay shows the tank staying under the line.
    Then the S2 Thursday moment: Sentinel spends a bit more to hold a truck, and 30 min later another pump fails and that truck saves it.
-   "EOG told us spending more now is fine if it's better in the long run."
-4. **1:40 Sentinel.** The trace runs on its own. Judges scan the QR code, you approve, and *their* phones buzz with the dispatch.
+   Explain it in our own words: "We only hold a truck when the expected saving beats the extra cost now. Here's the math."
+4. **1:40 Sentinel.** The trace runs on its own. Judges scan the QR code, which opens the `/field` phone view.
+   You approve on the console, and *their* phones buzz with the dispatch.
 5. **2:15 Proof.** Scorer slide (23/23, matches optimal on every snapshot). Switch to `test/` live.
-6. **2:45 Close.** "Built for the night shift." Show the handoff. Quote any feedback from EOG mentors.
+6. **2:45 Close.** "Built for the night shift." Show the handoff.
 
 ---
 
