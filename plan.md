@@ -97,7 +97,7 @@ shut in. That turns the prompt's line "If no one intervenes, Avon goes dark" int
 | Client state | TanStack Query (server data), Zustand (selected asset, time-machine t) | Caching + refetch when t changes, plus a tiny global store |
 | Platform | Responsive **web app** + installable **PWA** (`vite-plugin-pwa`: web manifest, icons, service worker) | Big-screen console for the control room, plus a phone view for the field from one codebase. Judges open a link with no install. "Add to Home Screen" makes it launch full screen like a native app. A native app would cost build and install time that isn't scored |
 | Field notifications | ntfy.sh push (primary, random topic name), Discord webhook (log shown on screen) | Judges scan a QR code and get the dispatch on **their own phone**, no account needed. A Twilio trial only texts pre-verified numbers |
-| Tooling | uv (Python), pnpm, pytest, ruff | Fast installs on hackathon wifi |
+| Tooling | uv (Python), npm, pytest, ruff, eslint | uv installs fast on hackathon wifi. npm is already installed for everyone (pnpm wasn't), so there's no extra setup |
 | Deploy | Local run = primary demo. Backup: frontend on Vercel, backend Docker on Fly.io or Railway (always on) | Render's free tier sleeps, which means a 30–60 s cold start in front of judges |
 
 - **Dataset upload:** besides the folder switcher, the UI accepts the 3 files by drag and drop, so the deployed copy can load `test/` at judging too.

@@ -1,0 +1,2606 @@
+{
+  "components": {
+    "schemas": {
+      "AgentRunResult": {
+        "additionalProperties": false,
+        "description": "A complete Sentinel run: all steps, the drafted actions and the shift handoff.",
+        "properties": {
+          "drafts": {
+            "description": "Actions waiting for operator approval.",
+            "items": {
+              "$ref": "#/components/schemas/DraftAction"
+            },
+            "title": "Drafts",
+            "type": "array"
+          },
+          "handoff": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "30-second shift handoff text from the report step.",
+            "title": "Handoff"
+          },
+          "run_id": {
+            "description": "Run ID.",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "steps": {
+            "description": "All six steps, in order.",
+            "items": {
+              "$ref": "#/components/schemas/AgentStep"
+            },
+            "title": "Steps",
+            "type": "array"
+          }
+        },
+        "required": [
+          "run_id",
+          "steps",
+          "drafts"
+        ],
+        "title": "AgentRunResult",
+        "type": "object"
+      },
+      "AgentStep": {
+        "additionalProperties": false,
+        "description": "One streamed step of a Sentinel run (one of the six workflow steps).",
+        "properties": {
+          "elapsed_s": {
+            "description": "Seconds since the run started.",
+            "title": "Elapsed S",
+            "type": "number"
+          },
+          "grounded": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "True if every number in message came from a tool result (grounding check).",
+            "title": "Grounded"
+          },
+          "index": {
+            "description": "Position in the run, starting at 0.",
+            "title": "Index",
+            "type": "integer"
+          },
+          "message": {
+            "description": "What Sentinel concluded in this step, in plain English.",
+            "title": "Message",
+            "type": "string"
+          },
+          "run_id": {
+            "description": "ID of the run this step belongs to.",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "status": {
+            "description": "Step status.",
+            "enum": [
+              "running",
+              "done",
+              "error",
+              "waiting_approval"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "step": {
+            "description": "Which workflow step this is.",
+            "enum": [
+              "triage",
+              "investigate",
+              "plan",
+              "verify",
+              "act",
+              "report"
+            ],
+            "title": "Step",
+            "type": "string"
+          },
+          "title": {
+            "description": "Short heading for the trace, e.g. 'Plan: 3 failures share 2 trucks'.",
+            "title": "Title",
+            "type": "string"
+          },
+          "tool_calls": {
+            "description": "Tools called in this step, in order.",
+            "items": {
+              "$ref": "#/components/schemas/ToolCall"
+            },
+            "title": "Tool Calls",
+            "type": "array"
+          }
+        },
+        "required": [
+          "run_id",
+          "index",
+          "step",
+          "status",
+          "title",
+          "message",
+          "tool_calls",
+          "elapsed_s"
+        ],
+        "title": "AgentStep",
+        "type": "object"
+      },
+      "Alert": {
+        "additionalProperties": false,
+        "description": "An ongoing event as shown in the alerts view, with its one-line action.\n\nOrder (SPEC \"Alerts view\"): pump failures first, smallest hours_to_limit first, ties go to\nhigher lost revenue per hour. Leaks and worn pumps follow in any order.",
+        "properties": {
+          "action_label": {
+            "description": "Short action text, e.g. '1 truck, 1 trip · $905' or 'Send inspector'.",
+            "title": "Action Label",
+            "type": "string"
+          },
+          "event": {
+            "$ref": "#/components/schemas/Event",
+            "description": "The ongoing event."
+          },
+          "order": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "1-based position among pump failures. Null for leaks and worn pumps.",
+            "title": "Order"
+          }
+        },
+        "required": [
+          "event",
+          "action_label"
+        ],
+        "title": "Alert",
+        "type": "object"
+      },
+      "ApproveRequest": {
+        "additionalProperties": false,
+        "description": "Operator decision on one drafted action.",
+        "properties": {
+          "action_id": {
+            "description": "DraftAction.id to approve or reject.",
+            "title": "Action Id",
+            "type": "string"
+          },
+          "approve": {
+            "description": "True = approve (Sentinel then notifies the field crew), False = reject.",
+            "title": "Approve",
+            "type": "boolean"
+          },
+          "run_id": {
+            "description": "Run the draft belongs to.",
+            "title": "Run Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "action_id",
+          "approve"
+        ],
+        "title": "ApproveRequest",
+        "type": "object"
+      },
+      "CostBreakdown": {
+        "additionalProperties": false,
+        "description": "Where a plan's cost comes from. All values in $.",
+        "properties": {
+          "shut_in": {
+            "description": "Revenue lost from wells we chose to shut in early, $.",
+            "title": "Shut In",
+            "type": "number"
+          },
+          "trip": {
+            "description": "Revenue lost if the tank still reaches shutdown (automatic shut-in), $.",
+            "title": "Trip",
+            "type": "number"
+          },
+          "trucks": {
+            "description": "Truck trips × cost per trip, $.",
+            "title": "Trucks",
+            "type": "number"
+          }
+        },
+        "required": [
+          "trucks",
+          "shut_in",
+          "trip"
+        ],
+        "title": "CostBreakdown",
+        "type": "object"
+      },
+      "DatasetInfo": {
+        "additionalProperties": false,
+        "description": "A dataset the app can load: a folder holding network.json, ops.json and telemetry.csv.",
+        "properties": {
+          "id": {
+            "description": "Dataset ID used in URLs, e.g. 'full_week', 'snapshot_2026-10-08T1200', 'test'.",
+            "title": "Id",
+            "type": "string"
+          },
+          "path": {
+            "description": "Folder path relative to the repo root.",
+            "title": "Path",
+            "type": "string"
+          },
+          "source": {
+            "description": "'folder' = found on disk, 'upload' = dropped into the UI.",
+            "enum": [
+              "folder",
+              "upload"
+            ],
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "path",
+          "source"
+        ],
+        "title": "DatasetInfo",
+        "type": "object"
+      },
+      "DisposalSite": {
+        "description": "Where a system's pipelines end. No sensors, never fails, fixed pressure.",
+        "properties": {
+          "id": {
+            "description": "Disposal site ID, e.g. 'S1_DISPOSAL'.",
+            "title": "Id",
+            "type": "string"
+          },
+          "lat": {
+            "description": "Latitude.",
+            "title": "Lat",
+            "type": "number"
+          },
+          "lon": {
+            "description": "Longitude.",
+            "title": "Lon",
+            "type": "number"
+          },
+          "pressure_psi": {
+            "description": "Fixed disposal pressure, psi. Healthy pipeline/pump pressures sit above it.",
+            "title": "Pressure Psi",
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "lat",
+          "lon",
+          "pressure_psi"
+        ],
+        "title": "DisposalSite",
+        "type": "object"
+      },
+      "DraftAction": {
+        "additionalProperties": false,
+        "description": "An action Sentinel drafted that waits in the approval queue for the operator.",
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/PlanAction",
+            "description": "The exact action that runs on approval."
+          },
+          "event_id": {
+            "description": "Event this action responds to.",
+            "title": "Event Id",
+            "type": "string"
+          },
+          "id": {
+            "description": "Draft ID, used when approving or rejecting.",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "description": "What the draft would do.",
+            "enum": [
+              "dispatch_truck",
+              "shut_in_wells",
+              "field_inspection",
+              "none"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "description": "One-line description for the approval card.",
+            "title": "Label",
+            "type": "string"
+          },
+          "status": {
+            "description": "Approval status.",
+            "enum": [
+              "pending",
+              "approved",
+              "rejected"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "label",
+          "action",
+          "event_id",
+          "status"
+        ],
+        "title": "DraftAction",
+        "type": "object"
+      },
+      "Event": {
+        "additionalProperties": false,
+        "description": "One detected problem. Produced by the detector (detect.py), never read from an answer key.",
+        "properties": {
+          "asset_id": {
+            "description": "Equipment with the problem (pump or pipeline ID).",
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "category": {
+            "description": "Problem type.",
+            "enum": [
+              "pump_failure",
+              "pipeline_leak",
+              "pump_degradation",
+              "other"
+            ],
+            "title": "Category",
+            "type": "string"
+          },
+          "confidence": {
+            "description": "How sure the detector is, 0-1. Low for slow problems just starting.",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "end_unix": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When it ended, unix seconds. Null while ongoing.",
+            "title": "End Unix"
+          },
+          "evidence": {
+            "description": "Plain-English reasons with numbers, e.g. '140 bpd missing between pump and disposal'.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence",
+            "type": "array"
+          },
+          "facility_id": {
+            "description": "Facility the problem is at.",
+            "title": "Facility Id",
+            "type": "string"
+          },
+          "hours_to_limit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HoursToLimit"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Countdown to shutdown. Null for leaks, worn pumps and resolved events."
+          },
+          "id": {
+            "description": "Our event ID, stable for the same problem across time-machine steps.",
+            "title": "Id",
+            "type": "string"
+          },
+          "level_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Tank level at the requested time, %. Pump failures only.",
+            "title": "Level Pct"
+          },
+          "lost_revenue_per_hour": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "$ per hour lost if the whole facility shuts in. Used as the alert-order tie-break.",
+            "title": "Lost Revenue Per Hour"
+          },
+          "onset_unix": {
+            "description": "When the problem started, unix seconds (back-dated by the detector).",
+            "title": "Onset Unix",
+            "type": "integer"
+          },
+          "status": {
+            "description": "'ongoing' at the requested time, or 'resolved' before it.",
+            "enum": [
+              "ongoing",
+              "resolved"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "system_id": {
+            "description": "System the problem is in.",
+            "title": "System Id",
+            "type": "string"
+          },
+          "trips_at_unix": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the tank reaches shutdown if nobody acts, unix seconds. Pump failures only.",
+            "title": "Trips At Unix"
+          }
+        },
+        "required": [
+          "id",
+          "category",
+          "system_id",
+          "facility_id",
+          "asset_id",
+          "status",
+          "onset_unix",
+          "confidence",
+          "evidence"
+        ],
+        "title": "Event",
+        "type": "object"
+      },
+      "ExportEvent": {
+        "additionalProperties": false,
+        "description": "One event in the SPEC events.json shape, for the export download.",
+        "properties": {
+          "asset_id": {
+            "description": "Asset ID.",
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "category": {
+            "description": "Problem type.",
+            "enum": [
+              "pump_failure",
+              "pipeline_leak",
+              "pump_degradation",
+              "other"
+            ],
+            "title": "Category",
+            "type": "string"
+          },
+          "confidence": {
+            "description": "Detector confidence, 0-1.",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "end_ts": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "End as ISO 8601 UTC. Required when resolved.",
+            "title": "End Ts"
+          },
+          "end_unix": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "End, unix seconds. Required when resolved.",
+            "title": "End Unix"
+          },
+          "event_id": {
+            "description": "Event ID.",
+            "title": "Event Id",
+            "type": "string"
+          },
+          "evidence": {
+            "description": "Plain-English reasons.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence",
+            "type": "array"
+          },
+          "facility_id": {
+            "description": "Facility ID.",
+            "title": "Facility Id",
+            "type": "string"
+          },
+          "hours_to_limit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HoursToLimit"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Countdown, ongoing pump failures only."
+          },
+          "level_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Tank level %, pump failures only.",
+            "title": "Level Pct"
+          },
+          "onset_ts": {
+            "description": "Onset as ISO 8601 UTC, e.g. '2026-10-11T21:00:00Z'.",
+            "title": "Onset Ts",
+            "type": "string"
+          },
+          "onset_unix": {
+            "description": "Onset, unix seconds.",
+            "title": "Onset Unix",
+            "type": "integer"
+          },
+          "recommended_actions": {
+            "description": "The recommended plan's actions.",
+            "items": {
+              "$ref": "#/components/schemas/PlanAction"
+            },
+            "title": "Recommended Actions",
+            "type": "array"
+          },
+          "status": {
+            "description": "ongoing or resolved.",
+            "enum": [
+              "ongoing",
+              "resolved"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "system_id": {
+            "description": "System ID.",
+            "title": "System Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "system_id",
+          "facility_id",
+          "asset_id",
+          "category",
+          "status",
+          "onset_ts",
+          "onset_unix",
+          "confidence",
+          "evidence",
+          "recommended_actions"
+        ],
+        "title": "ExportEvent",
+        "type": "object"
+      },
+      "Facility": {
+        "description": "One facility: a few wells feeding one tank, one pump and one pipeline.",
+        "properties": {
+          "id": {
+            "description": "Facility ID, e.g. 'S1_FACILITY_C'.",
+            "title": "Id",
+            "type": "string"
+          },
+          "lat": {
+            "description": "Latitude (placeholder coordinates from the organizers).",
+            "title": "Lat",
+            "type": "number"
+          },
+          "lon": {
+            "description": "Longitude (placeholder coordinates from the organizers).",
+            "title": "Lon",
+            "type": "number"
+          },
+          "pipeline": {
+            "$ref": "#/components/schemas/Pipeline",
+            "description": "The facility's pipeline to the disposal site."
+          },
+          "pump": {
+            "$ref": "#/components/schemas/Pump",
+            "description": "The facility's pump."
+          },
+          "tank": {
+            "$ref": "#/components/schemas/Tank",
+            "description": "The facility's tank."
+          },
+          "wells": {
+            "description": "Wells feeding this facility's tank.",
+            "items": {
+              "$ref": "#/components/schemas/Well"
+            },
+            "title": "Wells",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "lat",
+          "lon",
+          "wells",
+          "tank",
+          "pump",
+          "pipeline"
+        ],
+        "title": "Facility",
+        "type": "object"
+      },
+      "FacilityLogistics": {
+        "description": "Truck travel times for one facility.",
+        "properties": {
+          "cycle_min": {
+            "description": "Minutes for one round trip: haul away, empty, come back.",
+            "title": "Cycle Min",
+            "type": "number"
+          },
+          "response_min": {
+            "description": "Minutes from the call until a truck first reaches the facility from the yard.",
+            "title": "Response Min",
+            "type": "number"
+          }
+        },
+        "required": [
+          "response_min",
+          "cycle_min"
+        ],
+        "title": "FacilityLogistics",
+        "type": "object"
+      },
+      "FacilityState": {
+        "additionalProperties": false,
+        "description": "A facility's readings at the requested time. Drives the map, skyline and side panels.",
+        "properties": {
+          "facility_id": {
+            "description": "Facility ID.",
+            "title": "Facility Id",
+            "type": "string"
+          },
+          "inflow_bpd": {
+            "description": "Water flowing into the tank (sum of wells), bpd.",
+            "title": "Inflow Bpd",
+            "type": "number"
+          },
+          "pump_status": {
+            "description": "Pump status: 0 stopped, 1 running, 2 fault.",
+            "title": "Pump Status",
+            "type": "integer"
+          },
+          "shut_in": {
+            "description": "True when every well is shut in (the facility has tripped).",
+            "title": "Shut In",
+            "type": "boolean"
+          },
+          "system_id": {
+            "description": "System ID.",
+            "title": "System Id",
+            "type": "string"
+          },
+          "tank_level_pct": {
+            "description": "Tank level, %.",
+            "title": "Tank Level Pct",
+            "type": "number"
+          },
+          "wells_producing": {
+            "description": "Wells with status 1 (producing).",
+            "title": "Wells Producing",
+            "type": "integer"
+          },
+          "wells_total": {
+            "description": "Wells at this facility.",
+            "title": "Wells Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "facility_id",
+          "system_id",
+          "tank_level_pct",
+          "pump_status",
+          "inflow_bpd",
+          "wells_producing",
+          "wells_total",
+          "shut_in"
+        ],
+        "title": "FacilityState",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "Health": {
+        "additionalProperties": false,
+        "description": "Liveness check. The frontend shows a MOCK DATA badge when ``mock`` is true.",
+        "properties": {
+          "mock": {
+            "description": "True when routes serve fixtures instead of real results (NIGHTWATCH_MOCK=1).",
+            "title": "Mock",
+            "type": "boolean"
+          },
+          "ok": {
+            "description": "Always true when the server is up.",
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "version": {
+            "description": "Backend version string.",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "mock",
+          "version"
+        ],
+        "title": "Health",
+        "type": "object"
+      },
+      "HoursToLimit": {
+        "additionalProperties": false,
+        "description": "Countdown to the shutdown limit if nothing changes. Only for ongoing pump failures.",
+        "properties": {
+          "p10": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optimistic bound, hours (optional).",
+            "title": "P10"
+          },
+          "p50": {
+            "description": "Best estimate, hours.",
+            "title": "P50",
+            "type": "number"
+          },
+          "p90": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pessimistic bound, hours (optional).",
+            "title": "P90"
+          }
+        },
+        "required": [
+          "p50"
+        ],
+        "title": "HoursToLimit",
+        "type": "object"
+      },
+      "LongRunAssessment": {
+        "additionalProperties": false,
+        "description": "Why the long-run plan differs from the cheapest one (plan.md \"Cheapest now vs best in the long run\").",
+        "properties": {
+          "expected_saving": {
+            "description": "Expected $ saved later = risk of another failure × cost avoided.",
+            "title": "Expected Saving",
+            "type": "number"
+          },
+          "extra_cost_now": {
+            "description": "Long-run plan cost minus cheapest plan cost, $.",
+            "title": "Extra Cost Now",
+            "type": "number"
+          },
+          "reasons": {
+            "description": "Plain-English reasons, each backed by data (e.g. 'S2 lost 2 pumps in 30 min').",
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "recommend": {
+            "description": "True only if expected_saving > extra_cost_now.",
+            "title": "Recommend",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "extra_cost_now",
+          "expected_saving",
+          "reasons",
+          "recommend"
+        ],
+        "title": "LongRunAssessment",
+        "type": "object"
+      },
+      "Network": {
+        "description": "Parsed network.json: the equipment list. Read every number from here, never hardcode it.",
+        "properties": {
+          "defaults": {
+            "$ref": "#/components/schemas/NetworkDefaults",
+            "description": "Network-wide defaults (tank limits)."
+          },
+          "meta": {
+            "additionalProperties": true,
+            "description": "Units and timezone info from the file.",
+            "title": "Meta",
+            "type": "object"
+          },
+          "systems": {
+            "description": "All systems in the network.",
+            "items": {
+              "$ref": "#/components/schemas/System"
+            },
+            "title": "Systems",
+            "type": "array"
+          }
+        },
+        "required": [
+          "defaults",
+          "systems"
+        ],
+        "title": "Network",
+        "type": "object"
+      },
+      "NetworkDefaults": {
+        "description": "Network-wide defaults block of network.json.",
+        "properties": {
+          "tank_limits_pct": {
+            "$ref": "#/components/schemas/TankLimits",
+            "description": "Tank limits used for every tank."
+          }
+        },
+        "required": [
+          "tank_limits_pct"
+        ],
+        "title": "NetworkDefaults",
+        "type": "object"
+      },
+      "NetworkResponse": {
+        "additionalProperties": false,
+        "description": "Everything static about a dataset: the network, the ops rules and the time window.",
+        "properties": {
+          "dataset_id": {
+            "description": "Which dataset this describes.",
+            "title": "Dataset Id",
+            "type": "string"
+          },
+          "network": {
+            "$ref": "#/components/schemas/Network",
+            "description": "Parsed network.json."
+          },
+          "ops": {
+            "$ref": "#/components/schemas/Ops",
+            "description": "Parsed ops.json."
+          },
+          "time_range": {
+            "$ref": "#/components/schemas/TimeRange",
+            "description": "Time window from the telemetry."
+          }
+        },
+        "required": [
+          "dataset_id",
+          "network",
+          "ops",
+          "time_range"
+        ],
+        "title": "NetworkResponse",
+        "type": "object"
+      },
+      "Ops": {
+        "description": "Parsed ops.json: prices, repair times and trucks.",
+        "properties": {
+          "dataset_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Organizers' dataset label, if present.",
+            "title": "Dataset Id"
+          },
+          "emergency_trucking": {
+            "$ref": "#/components/schemas/Trucking",
+            "description": "Truck capacity and price per trip."
+          },
+          "expected_repair_hours": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "description": "Repair duration in hours by problem type, e.g. {'pump_failure': 6}. Counted from onset.",
+            "title": "Expected Repair Hours",
+            "type": "object"
+          },
+          "prices": {
+            "$ref": "#/components/schemas/Prices",
+            "description": "Oil and gas prices."
+          },
+          "systems": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/SystemOps"
+            },
+            "description": "Fleet and travel times keyed by system ID.",
+            "title": "Systems",
+            "type": "object"
+          }
+        },
+        "required": [
+          "prices",
+          "expected_repair_hours",
+          "emergency_trucking",
+          "systems"
+        ],
+        "title": "Ops",
+        "type": "object"
+      },
+      "Pipeline": {
+        "description": "The pipeline from the pump to the system's disposal site.",
+        "properties": {
+          "id": {
+            "description": "Pipeline ID, e.g. 'S1_PIPELINE_C'.",
+            "title": "Id",
+            "type": "string"
+          },
+          "max_bpd": {
+            "description": "Pipeline capacity, bpd.",
+            "title": "Max Bpd",
+            "type": "number"
+          },
+          "max_pressure_psi": {
+            "description": "Pipeline pressure rating, psi.",
+            "title": "Max Pressure Psi",
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "max_bpd",
+          "max_pressure_psi"
+        ],
+        "title": "Pipeline",
+        "type": "object"
+      },
+      "Plan": {
+        "additionalProperties": false,
+        "description": "One candidate response to one or more pump failures, with its simulated outcome.",
+        "properties": {
+          "actions": {
+            "description": "Steps of the plan.",
+            "items": {
+              "$ref": "#/components/schemas/PlanAction"
+            },
+            "title": "Actions",
+            "type": "array"
+          },
+          "cost_breakdown": {
+            "$ref": "#/components/schemas/CostBreakdown",
+            "description": "Cost split by source."
+          },
+          "cost_total": {
+            "description": "Total cost, $ (= trucks + shut_in + trip).",
+            "title": "Cost Total",
+            "type": "number"
+          },
+          "event_ids": {
+            "description": "Events this plan covers (several when failures share a fleet).",
+            "items": {
+              "type": "string"
+            },
+            "title": "Event Ids",
+            "type": "array"
+          },
+          "kind": {
+            "description": "Role in the plan panel: cheapest, long_run, do_nothing or alternative.",
+            "enum": [
+              "cheapest",
+              "long_run",
+              "do_nothing",
+              "alternative"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "description": "One-line summary, e.g. '1 truck, 1 trip · $905'.",
+            "title": "Label",
+            "type": "string"
+          },
+          "peak_level_pct": {
+            "description": "Highest tank level reached before the repair ends, %.",
+            "title": "Peak Level Pct",
+            "type": "number"
+          },
+          "tank_trips": {
+            "description": "True if the tank still reaches the shutdown limit under this plan.",
+            "title": "Tank Trips",
+            "type": "boolean"
+          },
+          "trips_at_unix": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the tank reaches shutdown under this plan, if it does.",
+            "title": "Trips At Unix"
+          }
+        },
+        "required": [
+          "kind",
+          "event_ids",
+          "actions",
+          "label",
+          "cost_total",
+          "cost_breakdown",
+          "tank_trips",
+          "peak_level_pct"
+        ],
+        "title": "Plan",
+        "type": "object"
+      },
+      "PlanAction": {
+        "additionalProperties": false,
+        "description": "One step of a plan. Same shape as SPEC 'events.json' recommended_actions.",
+        "properties": {
+          "asset_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "field_inspection: pump or pipeline to inspect.",
+            "title": "Asset Id"
+          },
+          "facility_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "dispatch_truck: facility the trucks go to.",
+            "title": "Facility Id"
+          },
+          "start_after_min": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "shut_in_wells: minutes after plan start to shut in (default 0).",
+            "title": "Start After Min"
+          },
+          "trips_per_truck": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "dispatch_truck: trips each truck makes (same for all).",
+            "title": "Trips Per Truck"
+          },
+          "trucks": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "dispatch_truck: number of trucks, all called at plan start.",
+            "title": "Trucks"
+          },
+          "type": {
+            "description": "What to do.",
+            "enum": [
+              "dispatch_truck",
+              "shut_in_wells",
+              "field_inspection",
+              "none"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "wells": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "shut_in_wells: well IDs to shut in.",
+            "title": "Wells"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "title": "PlanAction",
+        "type": "object"
+      },
+      "PlanResponse": {
+        "additionalProperties": false,
+        "description": "Everything the plan panel needs for one selected pump failure.",
+        "properties": {
+          "alternatives": {
+            "description": "Next-cheapest plans for 'Show your work', sorted by cost.",
+            "items": {
+              "$ref": "#/components/schemas/Plan"
+            },
+            "title": "Alternatives",
+            "type": "array"
+          },
+          "at_unix": {
+            "description": "Plan start time ('now' or the time-machine position), unix seconds.",
+            "title": "At Unix",
+            "type": "integer"
+          },
+          "cheapest": {
+            "$ref": "#/components/schemas/Plan",
+            "description": "Exact SPEC optimum. Always present; matched against the answer key."
+          },
+          "do_nothing": {
+            "$ref": "#/components/schemas/Plan",
+            "description": "Cost of letting the tank trip."
+          },
+          "event_id": {
+            "description": "The selected event.",
+            "title": "Event Id",
+            "type": "string"
+          },
+          "long_run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Plan"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Long-run plan, only when it differs from cheapest."
+          },
+          "long_run_assessment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LongRunAssessment"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the long-run plan is suggested. Present whenever long_run is."
+          },
+          "traces": {
+            "description": "Tank curves: do nothing, cheapest, and long run if present.",
+            "items": {
+              "$ref": "#/components/schemas/SimTrace"
+            },
+            "title": "Traces",
+            "type": "array"
+          }
+        },
+        "required": [
+          "event_id",
+          "at_unix",
+          "cheapest",
+          "do_nothing",
+          "alternatives",
+          "traces"
+        ],
+        "title": "PlanResponse",
+        "type": "object"
+      },
+      "Prices": {
+        "description": "Prices used to value lost production.",
+        "properties": {
+          "gas_per_mcf": {
+            "description": "Gas price, $ per mcf.",
+            "title": "Gas Per Mcf",
+            "type": "number"
+          },
+          "oil_per_bbl": {
+            "description": "Oil price, $ per barrel.",
+            "title": "Oil Per Bbl",
+            "type": "number"
+          }
+        },
+        "required": [
+          "oil_per_bbl",
+          "gas_per_mcf"
+        ],
+        "title": "Prices",
+        "type": "object"
+      },
+      "Pump": {
+        "description": "The pump that empties the tank into the pipeline. It starts at start_level_pct and stops at stop_level_pct.",
+        "properties": {
+          "id": {
+            "description": "Pump ID, e.g. 'S1_PUMP_C'.",
+            "title": "Id",
+            "type": "string"
+          },
+          "max_flow_bpd": {
+            "description": "A healthy pump's flow while running, bpd.",
+            "title": "Max Flow Bpd",
+            "type": "number"
+          },
+          "start_level_pct": {
+            "description": "Tank level (%) at which the pump switches on.",
+            "title": "Start Level Pct",
+            "type": "number"
+          },
+          "stop_level_pct": {
+            "description": "Tank level (%) at which the pump switches off.",
+            "title": "Stop Level Pct",
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "max_flow_bpd",
+          "start_level_pct",
+          "stop_level_pct"
+        ],
+        "title": "Pump",
+        "type": "object"
+      },
+      "ReplayPoint": {
+        "additionalProperties": false,
+        "description": "Cumulative cost at one moment, for the replay chart (three lines).",
+        "properties": {
+          "cheapest": {
+            "description": "Cumulative cheapest-plan cost so far, $.",
+            "title": "Cheapest",
+            "type": "number"
+          },
+          "did_nothing": {
+            "description": "Cumulative did-nothing cost so far, $.",
+            "title": "Did Nothing",
+            "type": "number"
+          },
+          "long_run": {
+            "description": "Cumulative long-run cost so far, $.",
+            "title": "Long Run",
+            "type": "number"
+          },
+          "t_unix": {
+            "description": "Time, unix seconds.",
+            "title": "T Unix",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "t_unix",
+          "did_nothing",
+          "cheapest",
+          "long_run"
+        ],
+        "title": "ReplayPoint",
+        "type": "object"
+      },
+      "ReplayResult": {
+        "additionalProperties": false,
+        "description": "The savings replay page: what Nightwatch would have saved over the whole window.",
+        "properties": {
+          "cumulative": {
+            "description": "Cumulative cost curve over the window.",
+            "items": {
+              "$ref": "#/components/schemas/ReplayPoint"
+            },
+            "title": "Cumulative",
+            "type": "array"
+          },
+          "dataset_id": {
+            "description": "Dataset replayed.",
+            "title": "Dataset Id",
+            "type": "string"
+          },
+          "mode": {
+            "description": "Which planner the per-event rows use.",
+            "enum": [
+              "cheapest",
+              "long_run"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "rows": {
+            "description": "One row per pump failure, in onset order.",
+            "items": {
+              "$ref": "#/components/schemas/ReplayRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/ReplayTotals",
+            "description": "Three headline totals."
+          }
+        },
+        "required": [
+          "dataset_id",
+          "mode",
+          "totals",
+          "rows",
+          "cumulative"
+        ],
+        "title": "ReplayResult",
+        "type": "object"
+      },
+      "ReplayRow": {
+        "additionalProperties": false,
+        "description": "One pump failure in the savings replay table.",
+        "properties": {
+          "did_nothing_cost": {
+            "description": "Revenue lost in the recording for this event, $.",
+            "title": "Did Nothing Cost",
+            "type": "number"
+          },
+          "event_id": {
+            "description": "Event ID. Clicking the row jumps the time machine to its onset.",
+            "title": "Event Id",
+            "type": "string"
+          },
+          "facility_id": {
+            "description": "Facility.",
+            "title": "Facility Id",
+            "type": "string"
+          },
+          "onset_unix": {
+            "description": "When the failure started, unix seconds.",
+            "title": "Onset Unix",
+            "type": "integer"
+          },
+          "plan_cost": {
+            "description": "Cost of our plan for this event (mode chosen in the request), $.",
+            "title": "Plan Cost",
+            "type": "number"
+          },
+          "plan_label": {
+            "description": "One-line summary of our plan.",
+            "title": "Plan Label",
+            "type": "string"
+          },
+          "saved": {
+            "description": "did_nothing_cost minus plan_cost, $.",
+            "title": "Saved",
+            "type": "number"
+          }
+        },
+        "required": [
+          "event_id",
+          "facility_id",
+          "onset_unix",
+          "did_nothing_cost",
+          "plan_cost",
+          "saved",
+          "plan_label"
+        ],
+        "title": "ReplayRow",
+        "type": "object"
+      },
+      "ReplayTotals": {
+        "additionalProperties": false,
+        "description": "Week totals for the three replay scenarios, in $.",
+        "properties": {
+          "cheapest": {
+            "description": "Total cost with the cheapest plan per event, $.",
+            "title": "Cheapest",
+            "type": "number"
+          },
+          "did_nothing": {
+            "description": "Revenue lost in the recording, where nobody acted, $.",
+            "title": "Did Nothing",
+            "type": "number"
+          },
+          "long_run": {
+            "description": "Total cost with our long-run planner, $.",
+            "title": "Long Run",
+            "type": "number"
+          }
+        },
+        "required": [
+          "did_nothing",
+          "cheapest",
+          "long_run"
+        ],
+        "title": "ReplayTotals",
+        "type": "object"
+      },
+      "SeriesResponse": {
+        "additionalProperties": false,
+        "description": "One sensor's readings over time, for the trend charts.",
+        "properties": {
+          "asset_id": {
+            "description": "Asset the sensor belongs to.",
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "metric": {
+            "description": "Metric name from telemetry.csv, e.g. 'level_pct', 'flow_bpd'.",
+            "title": "Metric",
+            "type": "string"
+          },
+          "points": {
+            "description": "[[unix seconds, value], ...] in time order.",
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "title": "Points",
+            "type": "array"
+          }
+        },
+        "required": [
+          "asset_id",
+          "metric",
+          "points"
+        ],
+        "title": "SeriesResponse",
+        "type": "object"
+      },
+      "SimTrace": {
+        "additionalProperties": false,
+        "description": "A simulated tank-level curve for the what-if chart.",
+        "properties": {
+          "label": {
+            "description": "Legend label, e.g. 'Do nothing' or 'Cheapest plan'.",
+            "title": "Label",
+            "type": "string"
+          },
+          "points": {
+            "description": "[[unix seconds, level %], ...] in time order.",
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "shutdown_pct": {
+            "description": "Shutdown limit to draw, % (from network.json).",
+            "title": "Shutdown Pct",
+            "type": "number"
+          },
+          "warning_pct": {
+            "description": "Warning limit to draw, % (from network.json).",
+            "title": "Warning Pct",
+            "type": "number"
+          }
+        },
+        "required": [
+          "label",
+          "points",
+          "warning_pct",
+          "shutdown_pct"
+        ],
+        "title": "SimTrace",
+        "type": "object"
+      },
+      "SimulateRequest": {
+        "additionalProperties": false,
+        "description": "A custom what-if plan from the UI, simulated with the same rules as the optimizer.",
+        "properties": {
+          "actions": {
+            "description": "The plan to simulate.",
+            "items": {
+              "$ref": "#/components/schemas/PlanAction"
+            },
+            "title": "Actions",
+            "type": "array"
+          },
+          "at_unix": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Plan start, unix seconds. Null = the dataset's 'now'.",
+            "title": "At Unix"
+          },
+          "event_id": {
+            "description": "Pump failure to simulate.",
+            "title": "Event Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "actions"
+        ],
+        "title": "SimulateRequest",
+        "type": "object"
+      },
+      "StateResponse": {
+        "additionalProperties": false,
+        "description": "The whole network as of one moment: what the Command view renders.",
+        "properties": {
+          "alerts": {
+            "description": "Ongoing problems, already in alerts-view order.",
+            "items": {
+              "$ref": "#/components/schemas/Alert"
+            },
+            "title": "Alerts",
+            "type": "array"
+          },
+          "at_unix": {
+            "description": "The moment this state describes, unix seconds (time machine position).",
+            "title": "At Unix",
+            "type": "integer"
+          },
+          "dataset_id": {
+            "description": "Dataset this state belongs to.",
+            "title": "Dataset Id",
+            "type": "string"
+          },
+          "events": {
+            "description": "Every event that has started by at_unix, ongoing and resolved.",
+            "items": {
+              "$ref": "#/components/schemas/Event"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "facilities": {
+            "description": "Every facility's readings at at_unix.",
+            "items": {
+              "$ref": "#/components/schemas/FacilityState"
+            },
+            "title": "Facilities",
+            "type": "array"
+          },
+          "lost_revenue_per_hour_total": {
+            "description": "$ per hour being lost right now from shut-in wells.",
+            "title": "Lost Revenue Per Hour Total",
+            "type": "number"
+          },
+          "now_unix": {
+            "description": "The dataset's 'now' (last telemetry timestamp).",
+            "title": "Now Unix",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "dataset_id",
+          "at_unix",
+          "now_unix",
+          "facilities",
+          "alerts",
+          "events",
+          "lost_revenue_per_hour_total"
+        ],
+        "title": "StateResponse",
+        "type": "object"
+      },
+      "System": {
+        "description": "A group of facilities sharing one disposal site and one truck fleet.",
+        "properties": {
+          "center": {
+            "description": "Map center as [lat, lon].",
+            "items": {
+              "type": "number"
+            },
+            "title": "Center",
+            "type": "array"
+          },
+          "disposal_site": {
+            "$ref": "#/components/schemas/DisposalSite",
+            "description": "The system's disposal site."
+          },
+          "facilities": {
+            "description": "Facilities in this system.",
+            "items": {
+              "$ref": "#/components/schemas/Facility"
+            },
+            "title": "Facilities",
+            "type": "array"
+          },
+          "id": {
+            "description": "System ID, e.g. 'S1'.",
+            "title": "Id",
+            "type": "string"
+          },
+          "truck_yard": {
+            "description": "Truck yard location as [lat, lon]. Trucks start every job from here.",
+            "items": {
+              "type": "number"
+            },
+            "title": "Truck Yard",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "center",
+          "truck_yard",
+          "disposal_site",
+          "facilities"
+        ],
+        "title": "System",
+        "type": "object"
+      },
+      "SystemOps": {
+        "description": "One system's truck fleet and per-facility travel times.",
+        "properties": {
+          "emergency_fleet_size": {
+            "description": "Number of trucks this system has. Shared by all its facilities.",
+            "title": "Emergency Fleet Size",
+            "type": "integer"
+          },
+          "facilities": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/FacilityLogistics"
+            },
+            "description": "Travel times keyed by facility ID.",
+            "title": "Facilities",
+            "type": "object"
+          }
+        },
+        "required": [
+          "emergency_fleet_size",
+          "facilities"
+        ],
+        "title": "SystemOps",
+        "type": "object"
+      },
+      "Tank": {
+        "description": "The facility's water tank. Level % × capacity = volume in barrels.",
+        "properties": {
+          "capacity_bbl": {
+            "description": "Tank size in barrels (bbl).",
+            "title": "Capacity Bbl",
+            "type": "number"
+          },
+          "id": {
+            "description": "Tank ID, e.g. 'S1_TANK_C'.",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "capacity_bbl"
+        ],
+        "title": "Tank",
+        "type": "object"
+      },
+      "TankLimits": {
+        "description": "Tank limits in percent full. The same for every tank (SPEC: only defaults.tank_limits_pct).",
+        "properties": {
+          "shutdown": {
+            "description": "Shutdown level, % full. At this level the wells shut in automatically.",
+            "title": "Shutdown",
+            "type": "number"
+          },
+          "warning": {
+            "description": "Warning level, % full.",
+            "title": "Warning",
+            "type": "number"
+          }
+        },
+        "required": [
+          "warning",
+          "shutdown"
+        ],
+        "title": "TankLimits",
+        "type": "object"
+      },
+      "TimeRange": {
+        "additionalProperties": false,
+        "description": "The dataset's time window, taken from the telemetry (no file states it).",
+        "properties": {
+          "now_unix": {
+            "description": "Last telemetry timestamp = 'now' for this dataset. Never use the system clock.",
+            "title": "Now Unix",
+            "type": "integer"
+          },
+          "start_unix": {
+            "description": "First telemetry timestamp, unix seconds (UTC).",
+            "title": "Start Unix",
+            "type": "integer"
+          },
+          "step_s": {
+            "description": "Seconds between readings (300 = 5 minutes).",
+            "title": "Step S",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "start_unix",
+          "now_unix",
+          "step_s"
+        ],
+        "title": "TimeRange",
+        "type": "object"
+      },
+      "ToolCall": {
+        "additionalProperties": false,
+        "description": "One tool Sentinel called during a step, shown in the expandable trace.",
+        "properties": {
+          "args": {
+            "additionalProperties": true,
+            "description": "Arguments Sentinel passed.",
+            "title": "Args",
+            "type": "object"
+          },
+          "name": {
+            "description": "Tool name, e.g. 'optimize_plan'.",
+            "title": "Name",
+            "type": "string"
+          },
+          "result_summary": {
+            "description": "Short summary of what the tool returned.",
+            "title": "Result Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "args",
+          "result_summary"
+        ],
+        "title": "ToolCall",
+        "type": "object"
+      },
+      "Trucking": {
+        "description": "Emergency truck economics (same for every system).",
+        "properties": {
+          "cost_per_trip": {
+            "description": "Flat price of one truck trip, $.",
+            "title": "Cost Per Trip",
+            "type": "number"
+          },
+          "truck_capacity_bbl": {
+            "description": "Barrels removed per truck trip.",
+            "title": "Truck Capacity Bbl",
+            "type": "number"
+          }
+        },
+        "required": [
+          "truck_capacity_bbl",
+          "cost_per_trip"
+        ],
+        "title": "Trucking",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "Well": {
+        "description": "One well. Its water fills the facility's tank; its oil and gas are the revenue we lose if it's shut in.",
+        "properties": {
+          "baseline_water_bpd": {
+            "description": "Normal water production, barrels per day (bpd).",
+            "title": "Baseline Water Bpd",
+            "type": "number"
+          },
+          "gas_mcfd": {
+            "description": "Gas production, mcf (thousand cubic feet) per day. Lost while shut in.",
+            "title": "Gas Mcfd",
+            "type": "number"
+          },
+          "id": {
+            "description": "Well ID, e.g. 'S1_WELL_C2'.",
+            "title": "Id",
+            "type": "string"
+          },
+          "oil_bpd": {
+            "description": "Oil production, barrels per day. Lost while the well is shut in.",
+            "title": "Oil Bpd",
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "baseline_water_bpd",
+          "oil_bpd",
+          "gas_mcfd"
+        ],
+        "title": "Well",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Backend for the Avon Nightwatch operator console. See plan.md for the design.",
+    "title": "Avon Nightwatch API",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/datasets": {
+      "get": {
+        "description": "Every dataset folder the app can load (feeds the dataset switcher, T6.2).",
+        "operationId": "list_datasets_api_datasets_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/DatasetInfo"
+                  },
+                  "title": "Response List Datasets Api Datasets Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Datasets",
+        "tags": [
+          "datasets"
+        ]
+      }
+    },
+    "/api/datasets/upload": {
+      "post": {
+        "description": "Upload the 3 files as a new dataset, for the deployed copy at judging (task T4.2).",
+        "operationId": "upload_dataset_api_datasets_upload_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetInfo"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Upload Dataset",
+        "tags": [
+          "datasets"
+        ]
+      }
+    },
+    "/api/health": {
+      "get": {
+        "description": "Liveness check. ``mock`` tells the UI whether to show the MOCK DATA badge.",
+        "operationId": "health_api_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health",
+        "tags": [
+          "meta"
+        ]
+      }
+    },
+    "/api/{ds}/agent/approve": {
+      "post": {
+        "description": "Approve or reject one drafted action. On approve, the real version notifies the field crew (T5.5).",
+        "operationId": "approve_action_api__ds__agent_approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ds",
+            "required": true,
+            "schema": {
+              "title": "Ds",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftAction"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Approve Action",
+        "tags": [
+          "sentinel"
+        ]
+      }
+    },
+    "/api/{ds}/agent/run": {
+      "post": {
+        "description": "Start a Sentinel run and stream its six steps live (T5.3).\n\nUse a fetch-based SSE reader in the frontend: browsers' EventSource only supports GET.",
+        "operationId": "run_agent_api__ds__agent_run_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ds",
+            "required": true,
+            "schema": {
+              "title": "Ds",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "text/event-stream": {}
+            },
+            "description": "Server-sent events. 'step' events carry one AgentStep as JSON, then one 'drafts' event carries the list of DraftAction, then 'done' carries {run_id, handoff}."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Run Agent",
+        "tags": [
+          "sentinel"
+        ]
+      }
+    },
+    "/api/{ds}/agent/runs/{run_id}": {
+      "get": {
+        "description": "Fetch a finished Sentinel run (e.g. after a page reload) (T5.3).",
+        "operationId": "get_agent_run_api__ds__agent_runs__run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ds",
+            "required": true,
+            "schema": {
+              "title": "Ds",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentRunResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Agent Run",
+        "tags": [
+          "sentinel"
+        ]
+      }
+    },
+    "/api/{ds}/events.json": {
+      "get": {
+        "description": "Download events in the SPEC events.json shape (T4.3).",
+        "operationId": "export_events_api__ds__events_json_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ds",
+            "required": true,
+            "schema": {
+              "title": "Ds",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Export as of this time, unix seconds. Omit for 'now'.",
+            "in": "query",
+            "name": "at",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Export as of this time, unix seconds. Omit for 'now'.",
+              "title": "At"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ExportEvent"
+                  },
+                  "title": "Response Export Events Api  Ds  Events Json Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Events",
+        "tags": [
+          "export"
+        ]
+      }
+    },
+    "/api/{ds}/network": {
+      "get": {
+        "description": "Static description of a dataset: network.json, ops.json and the telemetry time window.\n\nReal in M0 so the map (T6.3) can be built on real geometry. Reads only the three\ndataset files, never the answer key.",
+        "operationId": "get_network_api__ds__network_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ds",
+            "required": true,
+            "schema": {
+              "title": "Ds",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NetworkResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Network",
+        "tags": [
+          "datasets"
+        ]
+      }
+    },
+    "/api/{ds}/plan/{event_id}": {
+      "get": {
+        "description": "Plan panel data for one pump failure: cheapest, long run, do nothing, alternatives (T3.5, T3.6).",
+        "operationId": "get_plan_api__ds__plan__event_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ds",
+            "required": true,
+            "schema": {
+              "title": "Ds",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "title": "Event Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Plan start, unix seconds. Omit for 'now'.",
+            "in": "query",
+            "name": "at",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Plan start, unix seconds. Omit for 'now'.",
+              "title": "At"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Plan",
+        "tags": [
+          "plans"
+        ]
+      }
+    },
+    "/api/{ds}/replay": {
+      "get": {
+        "description": "Savings replay: did nothing vs cheapest per event vs long run over the whole window (T3.7).",
+        "operationId": "get_replay_api__ds__replay_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ds",
+            "required": true,
+            "schema": {
+              "title": "Ds",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Planner for the per-event rows.",
+            "in": "query",
+            "name": "mode",
+            "required": false,
+            "schema": {
+              "default": "long_run",
+              "description": "Planner for the per-event rows.",
+              "enum": [
+                "cheapest",
+                "long_run"
+              ],
+              "title": "Mode",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplayResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Replay",
+        "tags": [
+          "plans"
+        ]
+      }
+    },
+    "/api/{ds}/series": {
+      "get": {
+        "description": "One sensor's readings for the trend charts (T1.1 loader + T6.6 chart).",
+        "operationId": "get_series_api__ds__series_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ds",
+            "required": true,
+            "schema": {
+              "title": "Ds",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Asset ID, e.g. 'S2_TANK_B'.",
+            "in": "query",
+            "name": "asset",
+            "required": true,
+            "schema": {
+              "description": "Asset ID, e.g. 'S2_TANK_B'.",
+              "title": "Asset",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Metric from telemetry.csv, e.g. 'level_pct'.",
+            "in": "query",
+            "name": "metric",
+            "required": true,
+            "schema": {
+              "description": "Metric from telemetry.csv, e.g. 'level_pct'.",
+              "title": "Metric",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Start, unix seconds.",
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Start, unix seconds.",
+              "title": "From"
+            }
+          },
+          {
+            "description": "End, unix seconds.",
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "End, unix seconds.",
+              "title": "To"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Series",
+        "tags": [
+          "console"
+        ]
+      }
+    },
+    "/api/{ds}/simulate": {
+      "post": {
+        "description": "Simulate a custom what-if plan with the same rules as the optimizer (T3.1 + T6.7).",
+        "operationId": "simulate_api__ds__simulate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ds",
+            "required": true,
+            "schema": {
+              "title": "Ds",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SimulateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Simulate",
+        "tags": [
+          "plans"
+        ]
+      }
+    },
+    "/api/{ds}/state": {
+      "get": {
+        "description": "The whole network as of one moment: facilities, ordered alerts and events (T2.5 + T2.7).",
+        "operationId": "get_state_api__ds__state_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ds",
+            "required": true,
+            "schema": {
+              "title": "Ds",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Unix seconds to view. Omit for the dataset's 'now'.",
+            "in": "query",
+            "name": "at",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Unix seconds to view. Omit for the dataset's 'now'.",
+              "title": "At"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get State",
+        "tags": [
+          "console"
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,231 @@
+{
+  "run_id": "run-mock-0001",
+  "steps": [
+    {
+      "run_id": "run-mock-0001",
+      "index": 0,
+      "step": "triage",
+      "status": "done",
+      "title": "Triage: 3 S2 pumps down, 2 trucks",
+      "message": "Three S2 pumps failed within an hour and share S2's 2 trucks. S2_FACILITY_B reaches shutdown first (1.42 h). Also open: a leak on S5_PIPELINE_B and worn pumps S3_PUMP_A and S4_PUMP_C.",
+      "tool_calls": [
+        {
+          "name": "list_active_alerts",
+          "args": {
+            "at": 1791460800
+          },
+          "result_summary": "6 ongoing: 3 S2 pump failures (1.42 / 2.33 / 2.58 h left), 1 leak, 2 worn pumps"
+        }
+      ],
+      "grounded": true,
+      "elapsed_s": 1.8
+    },
+    {
+      "run_id": "run-mock-0001",
+      "index": 1,
+      "step": "investigate",
+      "status": "done",
+      "title": "Investigate: confirmed pump failures",
+      "message": "All three S2 pumps report a fault (status 2) and their tanks are rising 9.2-9.7 %/h with no flow out. These are pump failures, not leaks.",
+      "tool_calls": [
+        {
+          "name": "get_readings",
+          "args": {
+            "asset": "S2_PUMP_B",
+            "metrics": [
+              "status",
+              "flow_bpd"
+            ],
+            "window_h": 3
+          },
+          "result_summary": "status 2 since 09:00, flow 0 bpd"
+        },
+        {
+          "name": "compare_to_baseline",
+          "args": {
+            "asset": "S2_TANK_B"
+          },
+          "result_summary": "level rising 9.5 %/h (normal sawtooth 30-70%)"
+        }
+      ],
+      "grounded": true,
+      "elapsed_s": 4.2
+    },
+    {
+      "run_id": "run-mock-0001",
+      "index": 2,
+      "step": "plan",
+      "status": "done",
+      "title": "Plan: 2 trucks + 1 late shut-in",
+      "message": "Cheapest joint plan: 1 truck to S2_FACILITY_B ($905), shut in S2_WELL_C1 at 12:46 ($1,298), 1 truck to S2_FACILITY_A ($905). Total $3,108 vs $12,241 if nothing is done. No other S2 pump is at risk, so the cheapest plan is also the best long-run plan.",
+      "tool_calls": [
+        {
+          "name": "get_fleet_status",
+          "args": {
+            "system": "S2",
+            "at": 1791460800
+          },
+          "result_summary": "2 of 2 trucks free"
+        },
+        {
+          "name": "optimize_plan",
+          "args": {
+            "system": "S2",
+            "at": 1791460800
+          },
+          "result_summary": "joint plan $3,108; do nothing $12,241"
+        },
+        {
+          "name": "assess_long_run",
+          "args": {
+            "system": "S2"
+          },
+          "result_summary": "no at-risk pumps; long run = cheapest"
+        }
+      ],
+      "grounded": true,
+      "elapsed_s": 9.6
+    },
+    {
+      "run_id": "run-mock-0001",
+      "index": 3,
+      "step": "verify",
+      "status": "done",
+      "title": "Verify: all tanks stay under 92%",
+      "message": "Simulated each tank with the plan: peaks 83.1%, 91.9% and 86.4%, all below the 92% shutdown limit.",
+      "tool_calls": [
+        {
+          "name": "simulate_plan",
+          "args": {
+            "facility": "S2_FACILITY_B"
+          },
+          "result_summary": "peak 83.1%, no trip"
+        },
+        {
+          "name": "simulate_plan",
+          "args": {
+            "facility": "S2_FACILITY_C"
+          },
+          "result_summary": "peak 91.9%, no trip"
+        },
+        {
+          "name": "simulate_plan",
+          "args": {
+            "facility": "S2_FACILITY_A"
+          },
+          "result_summary": "peak 86.4%, no trip"
+        }
+      ],
+      "grounded": true,
+      "elapsed_s": 12.3
+    },
+    {
+      "run_id": "run-mock-0001",
+      "index": 4,
+      "step": "act",
+      "status": "waiting_approval",
+      "title": "Act: 3 actions need your approval",
+      "message": "Drafted 2 truck dispatches and 1 scheduled shut-in. Waiting for operator approval before notifying the field crew.",
+      "tool_calls": [
+        {
+          "name": "draft_truck_dispatch",
+          "args": {
+            "facility": "S2_FACILITY_B",
+            "trucks": 1,
+            "trips": 1
+          },
+          "result_summary": "draft d-1"
+        },
+        {
+          "name": "schedule_shut_in",
+          "args": {
+            "well": "S2_WELL_C1",
+            "at": "12:46"
+          },
+          "result_summary": "draft d-2"
+        },
+        {
+          "name": "draft_truck_dispatch",
+          "args": {
+            "facility": "S2_FACILITY_A",
+            "trucks": 1,
+            "trips": 1
+          },
+          "result_summary": "draft d-3"
+        }
+      ],
+      "grounded": true,
+      "elapsed_s": 13.0
+    },
+    {
+      "run_id": "run-mock-0001",
+      "index": 5,
+      "step": "report",
+      "status": "done",
+      "title": "Report: shift handoff written",
+      "message": "Wrote the shift handoff and updated events.json.",
+      "tool_calls": [
+        {
+          "name": "write_handoff",
+          "args": {},
+          "result_summary": "handoff saved"
+        }
+      ],
+      "grounded": true,
+      "elapsed_s": 15.4
+    }
+  ],
+  "drafts": [
+    {
+      "id": "d-1",
+      "kind": "dispatch_truck",
+      "label": "Send 1 truck to S2_FACILITY_B (arrives ~13:10)",
+      "action": {
+        "type": "dispatch_truck",
+        "facility_id": "S2_FACILITY_B",
+        "trucks": 1,
+        "trips_per_truck": 1,
+        "wells": null,
+        "start_after_min": null,
+        "asset_id": null
+      },
+      "event_id": "EV-0008",
+      "status": "pending"
+    },
+    {
+      "id": "d-2",
+      "kind": "shut_in_wells",
+      "label": "Shut in S2_WELL_C1 at 12:46 until the repair (15:30)",
+      "action": {
+        "type": "shut_in_wells",
+        "facility_id": null,
+        "trucks": null,
+        "trips_per_truck": null,
+        "wells": [
+          "S2_WELL_C1"
+        ],
+        "start_after_min": 46.0,
+        "asset_id": null
+      },
+      "event_id": "EV-0009",
+      "status": "pending"
+    },
+    {
+      "id": "d-3",
+      "kind": "dispatch_truck",
+      "label": "Send 1 truck to S2_FACILITY_A (arrives ~13:25)",
+      "action": {
+        "type": "dispatch_truck",
+        "facility_id": "S2_FACILITY_A",
+        "trucks": 1,
+        "trips_per_truck": 1,
+        "wells": null,
+        "start_after_min": null,
+        "asset_id": null
+      },
+      "event_id": "EV-0010",
+      "status": "pending"
+    }
+  ],
+  "handoff": "Thu 12:00. S2 lost three pumps (B 09:00, C 09:30, A 10:00); repairs finish 15:00-16:00. Plan: one truck each to S2_FACILITY_B and S2_FACILITY_A (arrive ~13:10 and ~13:25), shut in S2_WELL_C1 at 12:46 until 15:30. Expected cost $3,108 vs $12,241 if nothing is done. Also open: leak on S5_PIPELINE_B since 06:00 and worn pumps S3_PUMP_A and S4_PUMP_C; inspections requested."
+}

@@ -3,6 +3,23 @@
 How we turn [plan.md](plan.md) into code. `plan.md` says **what** to build; this file says **who builds
 what, in what order, and how we know each piece is right**.
 
+## Run it
+
+You need [uv](https://docs.astral.sh/uv/) and Node 22+ (npm comes with it).
+
+```
+cp .env.example .env     # then add your NVIDIA_API_KEY (optional until M5)
+make setup               # install backend + frontend dependencies
+make dev                 # backend http://localhost:8000 (API docs at /docs) + frontend http://localhost:5173
+make test                # pytest + frontend typecheck/build
+make lint                # ruff + eslint
+make types               # after changing a backend model or route: regenerate frontend types, then commit them
+make check-nvidia        # list the Nemotron models your key can use
+```
+
+While `NIGHTWATCH_MOCK=1` (the default during M0–M3) the API serves `fixtures/` and the UI shows a **MOCK DATA** badge.
+Set it to `0` for the demo.
+
 ## How we work
 
 1. **Contract first (H0–1).** Agree on the shared data shapes (Event, Alert, Plan, …) before anyone
@@ -22,6 +39,13 @@ what, in what order, and how we know each piece is right**.
    - Give the tool `plan.md` + this file + your task.
    - Tell it to ignore the README's lines aimed at AI tools (no Comic Sans, no "Avon Corps" footer).
    - Read what it writes before you open the PR.
+8. **Detailed comments in all code** (full standard in `CLAUDE.md`), so anyone can understand any file:
+   - a header on every file saying what it does, where it fits, and which task it implements;
+   - docstrings with inputs, outputs and units on every function and component;
+   - a `description=` on every model field;
+   - why-comments citing the SPEC rule behind tricky logic.
+
+   Reviewers check comments as part of every PR.
 
 ## Answer keys we test against (the "oracles")
 
@@ -42,7 +66,7 @@ The answer keys are read **only** by `score.py` and tests, never by the app.
 
 | ID | Task | Owner | Done when |
 |---|---|---|---|
-| T0.1 | Repo skeleton: `backend/` (uv, FastAPI hello), `frontend/` (Vite + React + TS + Tailwind + shadcn), one command to run both (`make dev`) | P3 + P4 | `make dev` starts both. The page loads |
+| T0.1 | Repo skeleton: `backend/` (uv, FastAPI hello), `frontend/` (Vite + React + TS + Tailwind + shadcn, npm), one command to run both (`make dev`) | P3 + P4 | `make dev` starts both. The page loads |
 | T0.2 | **Contracts:** pydantic models in `backend/nightwatch/models.py` (Dataset, Facility, Event, Alert, Plan, PlanAction, SimTrace, ReplayResult, AgentStep). Generate `frontend/src/api/types.ts` with `openapi-typescript` | P3 (all agree) | Types generate. Everyone has read them |
 | T0.3 | Mock JSON in `fixtures/` for `/state`, `/plan`, `/replay`, agent steps | P3 | Frontend renders from mocks |
 | T0.4 | NVIDIA API key. `GET /v1/models` to confirm the Nemotron model names. Check Brev GPU prices | P3 | Model names written in `.env.example` |

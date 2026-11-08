@@ -1,0 +1,220 @@
+{
+  "dataset_id": "full_week",
+  "mode": "long_run",
+  "totals": {
+    "did_nothing": 51108.0,
+    "cheapest": 15326.0,
+    "long_run": 13240.0
+  },
+  "rows": [
+    {
+      "event_id": "EV-0003",
+      "facility_id": "S1_FACILITY_B",
+      "onset_unix": 1791339000,
+      "did_nothing_cost": 0.0,
+      "plan_cost": 0.0,
+      "saved": 0.0,
+      "plan_label": "Do nothing · peaks ~77%, never trips"
+    },
+    {
+      "event_id": "EV-0006",
+      "facility_id": "S1_FACILITY_C",
+      "onset_unix": 1791418800,
+      "did_nothing_cost": 5005.0,
+      "plan_cost": 905.0,
+      "saved": 4100.0,
+      "plan_label": "1 truck, 1 trip · $905"
+    },
+    {
+      "event_id": "EV-0008",
+      "facility_id": "S2_FACILITY_B",
+      "onset_unix": 1791450000,
+      "did_nothing_cost": 3879.0,
+      "plan_cost": 905.0,
+      "saved": 2974.0,
+      "plan_label": "1 truck, 1 trip · $905"
+    },
+    {
+      "event_id": "EV-0009",
+      "facility_id": "S2_FACILITY_C",
+      "onset_unix": 1791451800,
+      "did_nothing_cost": 2793.0,
+      "plan_cost": 1298.0,
+      "saved": 1495.0,
+      "plan_label": "Shut in S2_WELL_C1 · $1,298"
+    },
+    {
+      "event_id": "EV-0010",
+      "facility_id": "S2_FACILITY_A",
+      "onset_unix": 1791453600,
+      "did_nothing_cost": 5569.0,
+      "plan_cost": 905.0,
+      "saved": 4664.0,
+      "plan_label": "1 truck, 1 trip · $905"
+    },
+    {
+      "event_id": "EV-0011",
+      "facility_id": "S3_FACILITY_A",
+      "onset_unix": 1791489600,
+      "did_nothing_cost": 3313.0,
+      "plan_cost": 905.0,
+      "saved": 2408.0,
+      "plan_label": "1 truck, 1 trip · $905"
+    },
+    {
+      "event_id": "EV-0012",
+      "facility_id": "S4_FACILITY_C",
+      "onset_unix": 1791511200,
+      "did_nothing_cost": 7590.0,
+      "plan_cost": 1810.0,
+      "saved": 5780.0,
+      "plan_label": "1 truck, 2 trips · $1,810"
+    },
+    {
+      "event_id": "EV-0013",
+      "facility_id": "S4_FACILITY_B",
+      "onset_unix": 1791568800,
+      "did_nothing_cost": 1021.0,
+      "plan_cost": 478.0,
+      "saved": 543.0,
+      "plan_label": "Shut in S4_WELL_B1 · $478"
+    },
+    {
+      "event_id": "EV-0014",
+      "facility_id": "S4_FACILITY_C",
+      "onset_unix": 1791615600,
+      "did_nothing_cost": 2588.0,
+      "plan_cost": 905.0,
+      "saved": 1683.0,
+      "plan_label": "1 truck, 1 trip · $905"
+    },
+    {
+      "event_id": "EV-0015",
+      "facility_id": "S4_FACILITY_D",
+      "onset_unix": 1791617400,
+      "did_nothing_cost": 3088.0,
+      "plan_cost": 905.0,
+      "saved": 2183.0,
+      "plan_label": "1 truck, 1 trip · $905"
+    },
+    {
+      "event_id": "EV-0016",
+      "facility_id": "S4_FACILITY_A",
+      "onset_unix": 1791619200,
+      "did_nothing_cost": 6304.0,
+      "plan_cost": 2414.0,
+      "saved": 3890.0,
+      "plan_label": "Shut in S4_WELL_A2 · $2,414"
+    },
+    {
+      "event_id": "EV-0017",
+      "facility_id": "S5_FACILITY_C",
+      "onset_unix": 1791640800,
+      "did_nothing_cost": 5650.0,
+      "plan_cost": 905.0,
+      "saved": 4745.0,
+      "plan_label": "1 truck, 1 trip · $905"
+    },
+    {
+      "event_id": "EV-0018",
+      "facility_id": "S5_FACILITY_B",
+      "onset_unix": 1791642600,
+      "did_nothing_cost": 4308.0,
+      "plan_cost": 905.0,
+      "saved": 3403.0,
+      "plan_label": "1 truck, 1 trip · $905"
+    }
+  ],
+  "cumulative": [
+    {
+      "t_unix": 1791158400,
+      "did_nothing": 0.0,
+      "cheapest": 0.0,
+      "long_run": 0.0
+    },
+    {
+      "t_unix": 1791339000,
+      "did_nothing": 0.0,
+      "cheapest": 0.0,
+      "long_run": 0.0
+    },
+    {
+      "t_unix": 1791418800,
+      "did_nothing": 5005.0,
+      "cheapest": 905.0,
+      "long_run": 905.0
+    },
+    {
+      "t_unix": 1791450000,
+      "did_nothing": 8884.0,
+      "cheapest": 1810.0,
+      "long_run": 1810.0
+    },
+    {
+      "t_unix": 1791451800,
+      "did_nothing": 11677.0,
+      "cheapest": 2715.0,
+      "long_run": 3108.0
+    },
+    {
+      "t_unix": 1791453600,
+      "did_nothing": 17246.0,
+      "cheapest": 6099.0,
+      "long_run": 4013.0
+    },
+    {
+      "t_unix": 1791489600,
+      "did_nothing": 20559.0,
+      "cheapest": 7004.0,
+      "long_run": 4918.0
+    },
+    {
+      "t_unix": 1791511200,
+      "did_nothing": 28149.0,
+      "cheapest": 8814.0,
+      "long_run": 6728.0
+    },
+    {
+      "t_unix": 1791568800,
+      "did_nothing": 29170.0,
+      "cheapest": 9292.0,
+      "long_run": 7206.0
+    },
+    {
+      "t_unix": 1791615600,
+      "did_nothing": 31758.0,
+      "cheapest": 10197.0,
+      "long_run": 8111.0
+    },
+    {
+      "t_unix": 1791617400,
+      "did_nothing": 34846.0,
+      "cheapest": 11102.0,
+      "long_run": 9016.0
+    },
+    {
+      "t_unix": 1791619200,
+      "did_nothing": 41150.0,
+      "cheapest": 13516.0,
+      "long_run": 11430.0
+    },
+    {
+      "t_unix": 1791640800,
+      "did_nothing": 46800.0,
+      "cheapest": 14421.0,
+      "long_run": 12335.0
+    },
+    {
+      "t_unix": 1791642600,
+      "did_nothing": 51108.0,
+      "cheapest": 15326.0,
+      "long_run": 13240.0
+    },
+    {
+      "t_unix": 1791762900,
+      "did_nothing": 51108.0,
+      "cheapest": 15326.0,
+      "long_run": 13240.0
+    }
+  ]
+}

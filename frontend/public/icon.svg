@@ -1,0 +1,6 @@
+<!-- Placeholder app icon (browser tab + installed PWA). Replace with the final design in T6.11. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="14" fill="#0b0f17"/>
+  <path d="M14 46V26l6-4v24zM24 46V18l7-5v33zM35 46V22l6-4v28zM45 46V28l5-3v21z" fill="#22d3ee"/>
+  <circle cx="48" cy="14" r="4" fill="#f472b6"/>
+</svg>

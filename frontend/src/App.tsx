@@ -1,0 +1,62 @@
+/**
+ * App shell (task T0.1): header + routes.
+ *
+ * Header: product name, navigation, the dataset switcher and the MOCK DATA badge.
+ * Routes (plan.md "UI"):
+ *   /         Command view (operator console, the demo screen)
+ *   /field    phone view for the field crew (installable PWA start page)
+ *   /replay   savings replay
+ *   /handoff  shift handoff
+ */
+import { NavLink, Route, Routes } from "react-router-dom";
+
+import { DatasetSwitcher } from "@/components/DatasetSwitcher";
+import { MockBadge } from "@/components/MockBadge";
+import { cn } from "@/lib/utils";
+import { Command } from "@/pages/Command";
+import { Field } from "@/pages/Field";
+import { Handoff } from "@/pages/Handoff";
+import { Replay } from "@/pages/Replay";
+
+/** Navigation entries shown in the header. */
+const NAV = [
+  { to: "/", label: "Console" },
+  { to: "/replay", label: "Replay" },
+  { to: "/handoff", label: "Handoff" },
+  { to: "/field", label: "Field" },
+];
+
+/** The whole app: header on top, the active page below. */
+export function App() {
+  return (
+    <div className="min-h-screen">
+      <header className="flex flex-wrap items-center gap-4 border-b border-border px-4 py-3">
+        <span className="text-base font-semibold tracking-wider text-primary">AVON NIGHTWATCH</span>
+        <nav className="flex gap-1">
+          {NAV.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.to === "/"}
+              className={({ isActive }) =>
+                cn("rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted", isActive && "bg-muted text-foreground")
+              }
+            >
+              {item.label}
+            </NavLink>
+          ))}
+        </nav>
+        <div className="ml-auto flex items-center gap-3">
+          <MockBadge />
+          <DatasetSwitcher />
+        </div>
+      </header>
+      <Routes>
+        <Route path="/" element={<Command />} />
+        <Route path="/field" element={<Field />} />
+        <Route path="/replay" element={<Replay />} />
+        <Route path="/handoff" element={<Handoff />} />
+      </Routes>
+    </div>
+  );
+}
