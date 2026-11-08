@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -75,6 +76,19 @@ class Settings(BaseSettings):
     )
     env_leak_high_rate_bpd: float = Field(
         default=150.0, description="A leak is also 'high' risk once water goes missing at least this fast (bpd)."
+    )
+
+    # --- Orchestrator (ARCHITECTURE.md §9.2, §9.4) ------------------------------------------------------
+    agent_timeout_s: float = Field(
+        default=30.0,
+        description="Seconds each specialist agent gets before it's marked 'timeout' (a Nemotron explanation takes ~4 s).",
+    )
+    env_veto_risk: Literal["moderate", "high", "critical"] = Field(
+        default="high",
+        description=(
+            "Hard constraint: an option the environmental agent rates at or above this level is excluded when a "
+            "lower-risk option exists for the same incident. Policy choice, documented and configurable."
+        ),
     )
 
     # --- Mock mode (M0) ----------------------------------------------------------

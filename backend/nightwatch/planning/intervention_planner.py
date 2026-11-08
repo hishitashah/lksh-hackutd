@@ -33,6 +33,7 @@ its onset, with trucks still busy on earlier plans unavailable. Tests use it to 
 from __future__ import annotations
 
 import itertools
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from functools import lru_cache
@@ -48,6 +49,9 @@ from .simulator import SimOutcome, TankScenario, TruckPlan, WellRate, simulate
 
 GRID_STEP_S = 15 * 60  # spacing of the shut-in start grid for plans that only delay a trip
 MINUTE = 60
+
+# A filter on options: (event ID, candidate) -> keep it? Used by the orchestrator's hard constraints.
+Allowed = Callable[[str, "Candidate"], bool]
 
 
 @dataclass
@@ -98,9 +102,16 @@ class EventOptions:
     candidates: list[Candidate]
     do_nothing: Candidate
 
-    def best_with(self, max_trucks: int) -> Candidate:
-        """The cheapest option that uses at most ``max_trucks`` trucks."""
-        return next(c for c in self.candidates if c.trucks_used <= max_trucks)
+    def best_with(self, max_trucks: int, allowed: Allowed | None = None) -> Candidate | None:
+        """The cheapest option that uses at most ``max_trucks`` trucks and passes ``allowed`` (None if none does).
+
+        ``allowed(event_id, candidate)`` lets the orchestrator exclude options that break a hard constraint
+        (e.g. an environmental veto) while reusing this search.
+        """
+        return next(
+            (c for c in self.candidates if c.trucks_used <= max_trucks and (allowed is None or allowed(self.event.id, c))),
+            None,
+        )
 
 
 @dataclass
@@ -315,19 +326,34 @@ def plan_system(ds: Dataset, system_id: str, at: int, failures: list[Event]) -> 
     """
     fleet = ds.ops.systems[system_id].emergency_fleet_size
     options = {e.id: options_for_event(ds, e, at, fleet, e.level_pct) for e in failures}
+    plan = SystemPlan(system_id, at, fleet, fleet, options)
+    plan.selection = select_joint(options, fleet) or {}
+    return plan
+
+
+def select_joint(
+    options: dict[str, EventOptions], fleet: int, allowed: Allowed | None = None
+) -> dict[str, Candidate] | None:
+    """Cheapest combination of one option per failure that shares ``fleet`` trucks (§16).
+
+    Tries every split of the trucks across the failures (a truck goes to at most one tank), takes each failure's
+    cheapest allowed option for its share, and keeps the lowest total; ties go to fewer trucks. Returns None if some
+    failure has no allowed option at all. Used by the planner (no filter) and the orchestrator (hard-constraint filter).
+    """
     ids = list(options)
     best: tuple[float, int, tuple[int, ...]] | None = None
     for split in itertools.product(range(fleet + 1), repeat=len(ids)):
         if sum(split) > fleet:
             continue
-        chosen = [options[i].best_with(n) for i, n in zip(ids, split, strict=True)]
+        chosen = [options[i].best_with(n, allowed) for i, n in zip(ids, split, strict=True)]
+        if any(c is None for c in chosen):
+            continue
         key = (round(sum(c.cost_total for c in chosen), 2), sum(c.trucks_used for c in chosen), split)
         if best is None or key < best:
             best = key
-    plan = SystemPlan(system_id, at, fleet, fleet, options)
-    if best is not None:
-        plan.selection = {i: options[i].best_with(n) for i, n in zip(ids, best[2], strict=True)}
-    return plan
+    if best is None:
+        return None
+    return {i: options[i].best_with(n, allowed) for i, n in zip(ids, best[2], strict=True)}
 
 
 def plan_now(ds: Dataset, at: int | None = None) -> dict[str, SystemPlan]:
