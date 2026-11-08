@@ -96,7 +96,7 @@ shut in. That turns the prompt's line "If no one intervenes, Avon goes dark" int
 | Skyline | SVG + Framer Motion | Light and easy to drive from state |
 | Client state | TanStack Query (server data), Zustand (selected asset, time-machine t) | Caching + refetch when t changes, plus a tiny global store |
 | Platform | Responsive **web app** + installable **PWA** (`vite-plugin-pwa`: web manifest, icons, service worker) | Big-screen console for the control room, plus a phone view for the field from one codebase. Judges open a link with no install. "Add to Home Screen" makes it launch full screen like a native app. A native app would cost build and install time that isn't scored |
-| Field notifications | **Live `/field` page** fed by server-sent events (primary), ntfy.sh push (backup, random topic name), Discord webhook (log shown on screen) | Judges scan a QR code and see the dispatch appear on **their own phone** with no permissions or app. Real push alerts need app installs or permissions, so ntfy runs on a teammate's phone. A Twilio trial only texts pre-verified numbers |
+| Field notifications | **Live `/field` page** fed by server-sent events (the only phone path), plus a Discord webhook (log shown on screen) | Judges scan a QR code and see the dispatch appear on **their own phone** with no app, download or permissions, on iPhone and Android. Push services were rejected: ntfy needs an app on iPhones, and a Twilio trial only texts pre-verified numbers |
 | Work orders | GitHub Issues REST API (a fine-grained token scoped to one repo) | A real external system Sentinel opens, de-duplicates and closes on its own. It stands in for a work-order tool like ServiceNow, and judges can open the issues |
 | Tooling | uv (Python), npm, pytest, ruff, eslint | uv installs fast on hackathon wifi. npm is already installed for everyone (pnpm wasn't), so there's no extra setup |
 | Deploy | Local run = primary demo. Backup: frontend on Vercel, backend Docker on Fly.io or Railway (always on) | Render's free tier sleeps, which means a 30–60 s cold start in front of judges |
@@ -126,7 +126,7 @@ backend/nightwatch/
   agent/tools.py      LangChain tools wrapping the modules above (the LLM never does math)
   agent/graph.py      Sentinel LangGraph (6 nodes below), interrupt() for approval, streamed over SSE
   agent/grounding.py  every number in the agent's output must appear in a tool result
-  agent/notify.py     ntfy.sh push + Discord webhook; scheduled reminders
+  agent/notify.py     the /field dispatch feed (role-specific + scheduled reminder cards) + Discord webhook
 backend/scripts/score.py   DEV ONLY: compare detector/optimizer output with answer_key.json
 backend/tests/             pytest: sim reproduces EVENT_9; optimizer matches references
 frontend/src/  pages: Command, Field (mobile), Replay, Handoff, Training(stretch)
@@ -265,7 +265,7 @@ Sentinel (Nemotron Super) starts a run on its own
    │  tools fetch only what it needs: readings, baselines, fleet,
    │  then optimizer + simulator + long-run check
    ▼
-Verify → approval queue → ntfy/Discord → shift handoff
+Verify → approval queue → /field feed, GitHub Issues, Discord → shift handoff
 ```
 
 Why the LLM doesn't watch the raw data:
@@ -283,7 +283,7 @@ The UI streams each step as a visible trace with expandable tool calls.
 | **Uses Nemotron** | Super is the orchestrator, the referee, the borderline-alert reviewer and runs long tasks. Nano runs the three specialists, the evidence text and the handoff. Nano is self-hosted on NVIDIA Brev |
 | **Beyond a chatbot** | Sentinel starts **on its own** when the detector fires; nobody types a prompt. It runs in the background as the time machine plays. The chat box is optional |
 | **Multi-step workflows** | A 6-step graph whose Plan step is **multi-agent**: 3 specialists in parallel + a referee. Verify has a **self-correction loop**. Long tasks (fleet sizing, weekly review) are broken into many tool calls |
-| **Tool integration (external APIs, used intelligently)** | Internal tools (detector, optimizer, simulator) + external services: **GitHub Issues** as the work-order system (opens, de-duplicates and closes tickets itself), **ntfy** (pushes tailored to each role, plus scheduled reminders), Discord log. Stretch: OSRM road routing |
+| **Tool integration (external APIs, used intelligently)** | Internal tools (detector, optimizer, simulator) + external services: **GitHub Issues** as the work-order system (opens, de-duplicates and closes tickets itself) and a Discord log. Plus our own live `/field` dispatch feed (cards tailored to each role, scheduled reminders). Stretch: OSRM road routing |
 | **Real-world applicability** | Produced-water operations like EOG's: dollar impact, field crews, and a human approves every field action |
 
 ### Agent graph (one run per system; systems run in parallel)
@@ -299,7 +299,7 @@ Triage → Investigate ─→ Cost (exact Python optimizer + long-run check)
                           ▲                                  │  then escalate to the operator)
                           └──────────────────────────────────┘
                           ▼ passes
-                 Act (approval queue → GitHub Issues, ntfy, Discord) → Report
+                 Act (approval queue → /field feed, GitHub Issues, Discord) → Report
 ```
 
 1. **Triage:** `list_active_alerts(at)` → pick the highest risk and say why.
@@ -339,10 +339,9 @@ Triage → Investigate ─→ Cost (exact Python optimizer + long-run check)
      then closes it itself when the detector marks the event resolved.
    - **Live `/field` feed:** the approved action is added to the dispatch list and streamed to every open
      `/field` page (`GET /api/{ds}/field/stream`). This is what judges see on their own phones.
-   - **ntfy pushes tailored to each role** (real phone notifications, e.g. on a teammate's phone with the ntfy app):
-     - The driver gets the facility, the trips and the ETA. The inspector gets the evidence.
-     - Scheduled reminders use ntfy's delayed delivery, e.g. "Shut in S2_WELL_C1 at 12:46".
-     - In the demo, scale the delay to the time-machine speed.
+     - **Cards tailored to each role:** the driver gets the facility, the trips and the ETA. The inspector gets the evidence.
+     - **Scheduled reminder cards:** the backend holds a reminder (e.g. "Shut in S2_WELL_C1 at 12:46") and releases
+       it to `/field` when its time is reached. In the demo, the time is scaled to the time-machine speed.
    - **Discord log** shown on screen.
 6. **Report:** `write_handoff()` → a 30-second shift handoff + `events.json`. Uses Nano.
 
@@ -358,7 +357,7 @@ Triage → Investigate ─→ Cost (exact Python optimizer + long-run check)
 **Guardrails:**
 - Numbers come only from tool results. `grounding.py` pulls every $/%/time out of the answer and checks it against tool outputs, then shows a "✓ grounded" badge, or retries.
 - The referee can only choose among plans the optimizer produced. "Cheapest now" is always shown, so the EOG optimality check never depends on the LLM.
-- External actions (GitHub, ntfy, Discord) run only after operator approval, except closing a work order whose event the detector has marked resolved.
+- External actions (GitHub, Discord) and `/field` dispatches run only after operator approval, except closing a work order whose event the detector has marked resolved.
 - Low temperature for tool calls.
 - The console works fully with no LLM. Cache agent results per (dataset, at, prompt), and handle rate limits.
 
@@ -391,9 +390,7 @@ Triage → Investigate ─→ Cost (exact Python optimizer + long-run check)
       iPhones ignore that, which is fine.
   - The QR code on the console just opens `/field`. Judges scan it and watch orders arrive as you approve.
   - Phones can't reach `localhost`: use the deployed URL, or a tunnel like `cloudflared` to the laptop.
-    PWA install additionally needs HTTPS (both options provide it).
-  - ntfy is the **backup**: a teammate's phone with the ntfy app sits on the table and buzzes for real.
-- **Stretch:** Training mode (replay a crisis, the player decides against a clock, graded against the optimizer).
+    PWA install additionally needs HTTPS (both options provide it).- **Stretch:** Training mode (replay a crisis, the player decides against a clock, graded against the optimizer).
 
 ---
 
@@ -401,8 +398,8 @@ Triage → Investigate ─→ Cost (exact Python optimizer + long-run check)
 
 | Person | Owns |
 |---|---|
-| P1 Data | `data.py`, `detect.py`, the detection half of `score.py`, evidence/confidence. After the H12 freeze: Sentinel's specialist tools (T5.10) |
-| P2 Algorithms | `sim.py`, `optimize.py`, `alerts.py`, the plan half of `score.py`, `/simulate` |
+| P1 Data | `data.py`, `detect.py`, `alerts.py`, the detection half of `score.py`, evidence/confidence. After the H12 freeze: Sentinel's specialist tools (T5.10) |
+| P2 Algorithms | `sim.py`, `optimize.py`, the plan half of `score.py`, `/simulate` |
 | P3 Agent + API + pitch | `api.py`, `agent/*`, notify, grounding, Devpost, pitch |
 | P4 Frontend/UX | the React app, map, charts, skyline, time machine, mobile. P3 helps on the Sentinel panel |
 
@@ -433,7 +430,7 @@ Triage → Investigate ─→ Cost (exact Python optimizer + long-run check)
   - P2: `replay.py` (reuses the optimizer).
   - P4: `/replay` page.
   - P3: the "weekly ops review" Sentinel task.
-- **H14–20 (P1, P3, P4 in parallel while P2 builds the above):** time machine, what-if, skyline, deck.gl truck animation, approvals + live `/field` feed (+ ntfy backup), handoff, fleet-sizing task, `/field` phone view + PWA install (~30 min), dataset upload.
+- **H14–20 (P1, P3, P4 in parallel while P2 builds the above):** time machine, what-if, skyline, deck.gl truck animation, approvals + live `/field` feed, handoff, fleet-sizing task, `/field` phone view + PWA install (~30 min), dataset upload.
 - **H20–22:** bug bash, deploy, README with GIFs, Devpost, backup video.
   Start the judging-window Brev instance 30 min before judging and warm it up with one run.
 - **H22–24:** rehearse the pitch 3×. Sleep in shifts.
@@ -462,9 +459,7 @@ Triage → Investigate ─→ Cost (exact Python optimizer + long-run check)
   - `/field` is usable at 375 px wide.
   - An approval on the console makes the card appear on `/field` within ~1 s on both an iPhone and an Android
     phone, with no permissions granted.
-  - Turning the phone's Wi-Fi off and on: the feed reconnects and shows anything approved meanwhile.
-  - Backup: the teammate's ntfy phone buzzes on the same approval.
-- Long run:
+  - Turning the phone's Wi-Fi off and on: the feed reconnects and shows anything approved meanwhile.- Long run:
   - With the knobs at 0 and no at-risk pump, long-run = cheapest (pytest).
   - The S2 Thursday scenario reproduces a saving in the simulator. Put the real number in the pitch, not the rough estimate.
 - Savings replay:
@@ -514,7 +509,7 @@ the numbers the scorer and replay actually produce. Never claim a number you hav
    - The three specialists light up side by side, then the referee gives its verdict.
    - Judges scan the QR code, which opens the `/field` phone view.
    - You approve on the console, and the dispatch appears on *their* phones within a second, while a
-     teammate's phone buzzes (ntfy) and a GitHub work order opens for the leak.
+     GitHub work order opens for the leak.
 5. **2:15 Proof.**
    - Scorer slide: 23/23, matches optimal on every snapshot.
    - Savings replay: "Doing nothing cost $51k this week. Nightwatch: $15k or less."

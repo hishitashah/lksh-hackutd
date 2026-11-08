@@ -66,7 +66,7 @@ class Settings(BaseSettings):
     )
 
     # --- Field-crew notifications (M5) ----------------------------------------
-    ntfy_topic: str | None = Field(default=None, description="ntfy.sh topic for phone pushes. Use a random name.")
+    # Orders reach phones through the app's own live /field feed (T5.5), so no push service is configured.
     discord_webhook_url: str | None = Field(default=None, description="Discord webhook for the on-screen dispatch log.")
 
     # --- Work orders on GitHub Issues (M5, T5.13) -----------------------------

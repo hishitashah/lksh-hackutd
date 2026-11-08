@@ -3,6 +3,9 @@
 React + TypeScript + Vite, styled with Tailwind v4 and shadcn/ui. See `plan.md` "UI" for the design and
 `tasks.md` M6 for the tasks. Run everything from the repo root with `make dev` (backend + frontend together).
 
+**New to the frontend? Read [BRIEF.md](BRIEF.md) first.** It lists what each screen shows, the exact API fields
+it uses, and the rules that keep the UI linked to the backend.
+
 ## npm scripts (package.json can't hold comments, so they're described here)
 
 | Script | What it does |

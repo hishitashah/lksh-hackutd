@@ -122,7 +122,7 @@ This is the NVIDIA track work. See plan.md "How Sentinel meets the NVIDIA track 
 | T5.2 | `tools.py`: each tool wraps a P1/P2 function (mocks first), with a clear docstring + JSON output | T0.3 | pytest: every tool returns valid JSON |
 | T5.3 | LangGraph: 6 steps, streamed to the UI over SSE | T5.2 | On `snapshot_2026-10-08T1200`: all 6 steps stream and the run ends with drafts in the approval queue |
 | T5.4 | Grounding check | T5.3 | A planted fake number gets rejected and retried |
-| T5.5 | Approval (`interrupt()`) → (1) add to the dispatch list and stream it on `GET /api/{ds}/field/stream` (SSE over GET) + `GET /api/{ds}/dispatches`; (2) ntfy pushes tailored to each role (driver: facility, trips, ETA; inspector: evidence) + scheduled reminders (ntfy delayed delivery, scaled to the time-machine speed in the demo); (3) Discord log | T5.3 | Approve on the console → the order appears on an open `/field` page within ~1 s, and the teammate's ntfy phone buzzes. A shut-in reminder arrives at its scheduled time |
+| T5.5 | Approval (`interrupt()`) → (1) add to the dispatch list and stream it on `GET /api/{ds}/field/stream` (SSE over GET) + `GET /api/{ds}/dispatches`; (2) cards tailored to each role (driver: facility, trips, ETA; inspector: evidence) + scheduled reminder cards the backend releases to `/field` when their time is reached (scaled to the time-machine speed in the demo); (3) Discord log | T5.3 | Approve on the console → the order appears on an open `/field` page within ~1 s. A shut-in reminder card appears at its scheduled time |
 | T5.6 | Watcher trigger + debounce + cache | T2.5, T5.3 | The time machine crossing one onset triggers exactly one run |
 | T5.7 | Borderline-alert review (raise now / keep watching) | T2.6 | An early worn-pump signal gets a decision with a reason |
 | T5.8 | Nano on Brev + automatic fallback to hosted | T5.1 | Stopping the Brev instance mid-run still finishes the run |
@@ -134,6 +134,9 @@ This is the NVIDIA track work. See plan.md "How Sentinel meets the NVIDIA track 
 | T5.14 | *Stretch:* OSRM road route from yard to facility for the truck animation (display only), and a weather note for night trucking | T6.13 | Route drawn on the map. The note appears and never changes a cost |
 
 ## M6: Frontend (P4, H1–20)
+
+Start with [frontend/BRIEF.md](frontend/BRIEF.md): the exact API fields each screen uses and the rules that keep the
+UI linked to the backend. Need data that isn't there? Ask P3 to add it to the contract. Never compute it in the UI.
 
 | ID | Task | Depends | Done when |
 |---|---|---|---|
@@ -159,7 +162,7 @@ This is the NVIDIA track work. See plan.md "How Sentinel meets the NVIDIA track 
 |---|---|---|
 | **H6** | Thin slice | `snapshot_2026-10-08T1200`: a pump failure shows in the UI from the real API, with countdown + cheapest plan + a Sentinel explanation |
 | **H12** | Core correct + blind dry run | Scorer green on full_week + 3 snapshots. Mock test run blind with no crash. **Freeze the core** |
-| **H18** | Differentiators | Long-run cards, replay totals, the multi-agent Plan step, approval → live `/field` feed on a real phone (+ ntfy backup) and GitHub work orders all work |
+| **H18** | Differentiators | Long-run cards, replay totals, the multi-agent Plan step, approval → live `/field` feed on a real phone, and GitHub work orders all work |
 | **H20** | Feature freeze | Deployed. Branding grep clean. One full demo rehearsal |
 
 ## If we fall behind, cut in this order
@@ -167,7 +170,7 @@ This is the NVIDIA track work. See plan.md "How Sentinel meets the NVIDIA track 
 1. Training mode
 2. OSRM routes + weather note (T5.14)
 3. Truck animation (T6.13)
-4. Discord log (keep ntfy)
+4. Discord log (the `/field` feed stays)
 5. Disposal-down scenario
 6. Self-correction loop (T5.12): keep simple escalation
 7. Borderline-alert review (T5.7)
