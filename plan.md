@@ -21,7 +21,7 @@ night-shift operator console that does three things:
 Judging criteria: creativity, UX and looks, usefulness, cost optimality, no hardcoding, following instructions.
 A new network (`test/`, S6–S11) is dropped in before judging.
 
-Team of 4, ~24 hours, submitting to **both** EOG and an NVIDIA agent track. The Nemotron agent must be
+Team of 4, ~24 hours, submitting to EOG, NVIDIA and CBRE agent track. The Nemotron agent must be
 "beyond a chatbot": a multi-step workflow, real tool integrations, a real-world problem.
 The tech stack is chosen for what the project needs.
 
