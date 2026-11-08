@@ -15,7 +15,6 @@ from fastapi.testclient import TestClient
 from nightwatch import api
 from nightwatch.config import get_settings
 from nightwatch.models import (
-    DraftAction,
     ExportEvent,
     PlanResponse,
     ReplayResult,
@@ -26,15 +25,12 @@ from nightwatch.models import (
 DS = "snapshot_2026-10-08T1200"
 
 # Routes that serve fixtures until their phase lands: (method, path, json body or None).
-# /state, /series (Stage 1 monitoring), /plan (Phase 3 planner) and the Sentinel run (/agent/run, /agent/runs,
-# Phase 7) are real now and are tested separately (the Sentinel run in test_sentinel.py).
+# Everything else is real now and tested separately: /state, /series (Stage 1 monitoring), /plan (Phase 3), the
+# Sentinel run (Phase 7, test_sentinel.py) and approval + field dispatch (Phase 8, test_dispatch.py).
 MOCK_ROUTES = [
     ("post", f"/api/{DS}/simulate", {"event_id": "EV-0009", "actions": [{"type": "none"}]}),
     ("get", f"/api/{DS}/replay", None),
     ("get", f"/api/{DS}/events.json", None),
-    ("post", f"/api/{DS}/agent/approve", {"run_id": "run-1", "action_id": "d-1", "approve": True}),
-    ("get", f"/api/{DS}/dispatches", None),
-    ("get", f"/api/{DS}/field/stream", None),
 ]
 
 
@@ -52,10 +48,9 @@ def read_sse(resp) -> list[tuple[str, str]]:
 
 @pytest.fixture
 def client(monkeypatch) -> TestClient:
-    """A test client in mock mode with no delay between streamed agent steps."""
+    """A test client in mock mode (only simulate, replay and events.json still serve fixtures)."""
     monkeypatch.setenv("NIGHTWATCH_MOCK", "1")
     monkeypatch.setenv("DATA_DIRS", "history,test")
-    monkeypatch.setattr(api, "MOCK_STEP_DELAY_S", 0)
     get_settings.cache_clear()
     yield TestClient(api.app)
     get_settings.cache_clear()
@@ -134,33 +129,6 @@ def test_state_alerts_follow_spec_order(client: TestClient) -> None:
     assert hours == sorted(hours)
     first_other = next(i for i, a in enumerate(alerts) if a["event"]["category"] != "pump_failure")
     assert all(a["event"]["category"] != "pump_failure" for a in alerts[first_other:])
-
-
-def test_approve_stamps_the_decision(client: TestClient) -> None:
-    """Approving records the operator's decision and time; rejecting is recorded too."""
-    approved = DraftAction.model_validate(
-        client.post(f"/api/{DS}/agent/approve", json={"run_id": "r", "action_id": "d-1", "approve": True}).json()
-    )
-    assert approved.status == "approved" and approved.decided_at is not None
-    rejected = client.post(f"/api/{DS}/agent/approve", json={"run_id": "r", "action_id": "d-2", "approve": False})
-    assert rejected.json()["status"] == "rejected"
-
-
-def test_field_feed_only_carries_dispatched_orders(client: TestClient) -> None:
-    """/dispatches and /field/stream carry orders that were sent to the field, never pending drafts."""
-    listed = [DraftAction.model_validate(d) for d in client.get(f"/api/{DS}/dispatches").json()]
-    assert listed and all(d.status == "dispatched" and d.dispatched_at for d in listed)
-    with client.stream("GET", f"/api/{DS}/field/stream") as resp:
-        assert resp.status_code == 200
-        events = read_sse(resp)
-    streamed = [DraftAction.model_validate_json(data) for name, data in events if name == "dispatch"]
-    assert {d.id for d in streamed} == {d.id for d in listed}
-
-
-def test_approve_unknown_draft_is_404(client: TestClient) -> None:
-    """Approving a draft that doesn't exist gives a clear 404."""
-    resp = client.post(f"/api/{DS}/agent/approve", json={"run_id": "r", "action_id": "nope", "approve": True})
-    assert resp.status_code == 404
 
 
 @pytest.mark.parametrize("method,path,body", MOCK_ROUTES)

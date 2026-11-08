@@ -75,7 +75,12 @@ export interface paths {
         put?: never;
         /**
          * Approve Action
-         * @description Approve or reject one drafted action. On approve, the real version notifies the field crew (T5.5).
+         * @description Approve or reject one drafted action (ARCHITECTURE.md §10, Phase 8). Nothing is dispatched without this.
+         *
+         *     Approve: the draft is dispatched to the field right away and returned with status 'dispatched' (plus
+         *     decided_at, dispatched_at). Reject: returned 'rejected'; it never reaches the field.
+         *     Errors: 404 unknown run or draft; 409 already decided, already dispatched by another run, or more trucks than the
+         *     system has (the detail says which; the draft stays pending).
          */
         post: operations["approve_action_api__ds__agent_approve_post"];
         delete?: never;
@@ -136,9 +141,10 @@ export interface paths {
         };
         /**
          * List Dispatches
-         * @description Orders sent to the field app so far (status 'dispatched' or later), newest first (T5.5).
+         * @description Orders sent to the field app so far (status 'dispatched' or later), newest first (Phase 8).
          *
-         *     The /field page loads this once, then listens on /field/stream for new ones.
+         *     Only operator-approved actions are here: pending and rejected drafts never are. The /field page loads this
+         *     once, then listens on /field/stream for new ones.
          */
         get: operations["list_dispatches_api__ds__dispatches_get"];
         put?: never;
@@ -178,7 +184,7 @@ export interface paths {
         };
         /**
          * Field Stream
-         * @description Live feed of dispatched orders for the /field phone view (T5.5 + T6.11).
+         * @description Live feed of dispatched orders for the /field phone view (ARCHITECTURE.md §10 step 8, Phase 8).
          */
         get: operations["field_stream_api__ds__field_stream_get"];
         put?: never;
@@ -2009,7 +2015,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Server-sent events over GET, so the browser's built-in EventSource works on any phone. Each 'dispatch' event carries one DraftAction (status 'dispatched') as JSON. The stream may close; EventSource reconnects on its own (retry hint 3 s). De-duplicate cards by DraftAction.id. */
+            /** @description Server-sent events over GET, so the browser's built-in EventSource works on any phone. On connect, one 'dispatch' event per order already dispatched, then one per new order as the operator approves it; each carries one DraftAction (status 'dispatched') as JSON. The stream closes after a few minutes and EventSource reconnects on its own (retry hint 3 s). De-duplicate cards by DraftAction.id. */
             200: {
                 headers: {
                     [name: string]: unknown;

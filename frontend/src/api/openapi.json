@@ -2444,7 +2444,7 @@
     },
     "/api/{ds}/agent/approve": {
       "post": {
-        "description": "Approve or reject one drafted action. On approve, the real version notifies the field crew (T5.5).",
+        "description": "Approve or reject one drafted action (ARCHITECTURE.md §10, Phase 8). Nothing is dispatched without this.\n\nApprove: the draft is dispatched to the field right away and returned with status 'dispatched' (plus\ndecided_at, dispatched_at). Reject: returned 'rejected'; it never reaches the field.\nErrors: 404 unknown run or draft; 409 already decided, already dispatched by another run, or more trucks than the\nsystem has (the detail says which; the draft stays pending).",
         "operationId": "approve_action_api__ds__agent_approve_post",
         "parameters": [
           {
@@ -2609,7 +2609,7 @@
     },
     "/api/{ds}/dispatches": {
       "get": {
-        "description": "Orders sent to the field app so far (status 'dispatched' or later), newest first (T5.5).\n\nThe /field page loads this once, then listens on /field/stream for new ones.",
+        "description": "Orders sent to the field app so far (status 'dispatched' or later), newest first (Phase 8).\n\nOnly operator-approved actions are here: pending and rejected drafts never are. The /field page loads this\nonce, then listens on /field/stream for new ones.",
         "operationId": "list_dispatches_api__ds__dispatches_get",
         "parameters": [
           {
@@ -2721,7 +2721,7 @@
     },
     "/api/{ds}/field/stream": {
       "get": {
-        "description": "Live feed of dispatched orders for the /field phone view (T5.5 + T6.11).",
+        "description": "Live feed of dispatched orders for the /field phone view (ARCHITECTURE.md §10 step 8, Phase 8).",
         "operationId": "field_stream_api__ds__field_stream_get",
         "parameters": [
           {
@@ -2742,7 +2742,7 @@
               },
               "text/event-stream": {}
             },
-            "description": "Server-sent events over GET, so the browser's built-in EventSource works on any phone. Each 'dispatch' event carries one DraftAction (status 'dispatched') as JSON. The stream may close; EventSource reconnects on its own (retry hint 3 s). De-duplicate cards by DraftAction.id."
+            "description": "Server-sent events over GET, so the browser's built-in EventSource works on any phone. On connect, one 'dispatch' event per order already dispatched, then one per new order as the operator approves it; each carries one DraftAction (status 'dispatched') as JSON. The stream closes after a few minutes and EventSource reconnects on its own (retry hint 3 s). De-duplicate cards by DraftAction.id."
           },
           "422": {
             "content": {

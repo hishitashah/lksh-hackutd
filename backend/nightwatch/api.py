@@ -9,18 +9,18 @@ Real vs mock
 ------------
 * **Real:** ``/health``, ``/datasets``, ``/{ds}/network``, ``/{ds}/state``, ``/{ds}/series`` (Stage 1 monitoring,
   ``monitoring/`` + ``services/incident_service.py``), ``/{ds}/plan/{event_id}`` (the deterministic planner,
-  ``planning/``) and the Sentinel run, ``/{ds}/agent/run`` + ``/{ds}/agent/runs/{run_id}`` (the multi-agent
-  orchestrator, streamed by ``services/sentinel_service.py``). Real routes ignore ``NIGHTWATCH_MOCK``.
-* **Mock until their phase lands:** simulate, replay, export and the approval/dispatch routes answer from
-  ``fixtures/`` while ``NIGHTWATCH_MOCK=1``; with mock mode off they return 501. When a phase lands, replace its
-  ``_require_mock(...)`` branch with the real call.
+  ``planning/``), the Sentinel run, ``/{ds}/agent/run`` + ``/{ds}/agent/runs/{run_id}`` (the multi-agent
+  orchestrator, streamed by ``services/sentinel_service.py``), and approval + field dispatch, ``/{ds}/agent/approve``,
+  ``/{ds}/dispatches``, ``/{ds}/field/stream`` (``services/dispatch_service.py``). Real routes ignore
+  ``NIGHTWATCH_MOCK``.
+* **Mock only (cut from the MVP):** simulate, replay and the events.json export answer from ``fixtures/`` while
+  ``NIGHTWATCH_MOCK=1``; with mock mode off they return 501, so fixtures can never reach the demo.
 
 Never read ``answer_key.json`` here: the app finds every problem from the sensor data.
 """
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Literal
@@ -47,7 +47,7 @@ from .models import (
 from .monitoring.anomaly_detector import detect
 from .monitoring.telemetry_processor import Dataset, TelemetryValidationError, get_dataset, scan_datasets
 from .planning.intervention_planner import plan_response
-from .services import sentinel_service
+from .services import dispatch_service, sentinel_service
 from .services.incident_service import build_state
 
 app = FastAPI(
@@ -55,10 +55,6 @@ app = FastAPI(
     version=__version__,
     description="Backend for the Avon Nightwatch operator console. See ARCHITECTURE.md for the design.",
 )
-
-# Pause between mock field-feed events so the UI can show them arriving one by one.
-# Tests set this to 0.
-MOCK_STEP_DELAY_S = 0.5
 
 
 # ---------------------------------------------------------------------------
@@ -262,27 +258,29 @@ def get_agent_run(ds: str, run_id: str) -> AgentRunResult:
 
 
 @app.post("/api/{ds}/agent/approve", response_model=DraftAction, tags=["sentinel"])
-def approve_action(ds: str, body: ApproveRequest) -> DraftAction:
-    """Approve or reject one drafted action. On approve, the real version notifies the field crew (T5.5)."""
-    _dataset_path(ds)
-    _require_mock("T5.5")
-    for draft in mocks.mock_agent_run().drafts:
-        if draft.id == body.action_id:
-            draft.status = "approved" if body.approve else "rejected"
-            draft.decided_at = mocks.now_iso()
-            return draft
-    raise HTTPException(status_code=404, detail=f"Unknown draft action '{body.action_id}'.")
+async def approve_action(ds: str, body: ApproveRequest) -> DraftAction:
+    """Approve or reject one drafted action (ARCHITECTURE.md §10, Phase 8). Nothing is dispatched without this.
+
+    Approve: the draft is dispatched to the field right away and returned with status 'dispatched' (plus
+    decided_at, dispatched_at). Reject: returned 'rejected'; it never reaches the field.
+    Errors: 404 unknown run or draft; 409 already decided, already dispatched by another run, or more trucks than the
+    system has (the detail says which; the draft stays pending).
+    """
+    d = _dataset(ds)
+    try:
+        return dispatch_service.approve(d, body)
+    except dispatch_service.DispatchError as err:
+        raise HTTPException(status_code=err.status_code, detail=str(err)) from None
 
 
 @app.get("/api/{ds}/dispatches", response_model=list[DraftAction], tags=["field"])
 def list_dispatches(ds: str) -> list[DraftAction]:
-    """Orders sent to the field app so far (status 'dispatched' or later), newest first (T5.5).
+    """Orders sent to the field app so far (status 'dispatched' or later), newest first (Phase 8).
 
-    The /field page loads this once, then listens on /field/stream for new ones.
+    Only operator-approved actions are here: pending and rejected drafts never are. The /field page loads this
+    once, then listens on /field/stream for new ones.
     """
-    _dataset_path(ds)
-    _require_mock("T5.5")
-    return mocks.mock_dispatches()
+    return dispatch_service.list_dispatches(_dataset(ds).id)
 
 
 @app.get(
@@ -291,24 +289,22 @@ def list_dispatches(ds: str) -> list[DraftAction]:
     responses={
         200: {
             "description": (
-                "Server-sent events over GET, so the browser's built-in EventSource works on any phone. "
-                "Each 'dispatch' event carries one DraftAction (status 'dispatched') as JSON. The stream may "
-                "close; EventSource reconnects on its own (retry hint 3 s). De-duplicate cards by DraftAction.id."
+                "Server-sent events over GET, so the browser's built-in EventSource works on any phone. On connect, "
+                "one 'dispatch' event per order already dispatched, then one per new order as the operator approves "
+                "it; each carries one DraftAction (status 'dispatched') as JSON. The stream closes after a few "
+                "minutes and EventSource reconnects on its own (retry hint 3 s). De-duplicate cards by DraftAction.id."
             ),
             "content": {"text/event-stream": {}},
         }
     },
 )
 async def field_stream(ds: str) -> EventSourceResponse:
-    """Live feed of dispatched orders for the /field phone view (T5.5 + T6.11)."""
-    _dataset_path(ds)
-    _require_mock("T5.5")
-    dispatched = mocks.mock_dispatches()
+    """Live feed of dispatched orders for the /field phone view (ARCHITECTURE.md §10 step 8, Phase 8)."""
+    d = _dataset(ds)
 
-    async def stream() -> AsyncIterator[dict[str, str]]:
-        """Mock: send each dispatched order once, then close (EventSource reconnects)."""
-        for order in dispatched:
-            await asyncio.sleep(MOCK_STEP_DELAY_S)
+    async def stream() -> AsyncIterator[dict[str, str | int]]:
+        """Every current order, then each new one live, until the connection's time limit."""
+        async for order in dispatch_service.subscribe(d.id):
             yield {"event": "dispatch", "data": order.model_dump_json(), "retry": 3000}
 
     return EventSourceResponse(stream())

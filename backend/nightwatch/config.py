@@ -91,6 +91,15 @@ class Settings(BaseSettings):
         ),
     )
 
+    # --- Field dispatch (ARCHITECTURE.md §10) -----------------------------------------------------------
+    field_stream_max_s: float = Field(
+        default=300.0,
+        description=(
+            "Seconds a /field/stream connection stays open before the server closes it; the browser's EventSource "
+            "reconnects on its own and gets every current order again (de-duplicated by ID)."
+        ),
+    )
+
     # --- Mock mode (M0) ----------------------------------------------------------
     nightwatch_mock: bool = Field(
         default=True,
