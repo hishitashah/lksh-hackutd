@@ -6,6 +6,8 @@ pump failures from sensor data, counts down to tank shutdowns, and recommends th
 A Nemotron agent called **Sentinel** investigates, plans, verifies and drafts actions for the operator to approve.
 
 ## Read first
+- **`TONIGHT.md`: the cut scope for the deadline. It overrides plan.md / tasks.md / backend-next.md. Do not build
+  anything listed under "Out".**
 - `plan.md`: what we're building and why (product, architecture, Sentinel, demo).
 - `tasks.md`: who builds what, in what order, and the "done when" check for each task (T0.1 ... T6.13).
 - `SPEC.md` + `README.md`: the organizers' rules (file formats, equipment behavior, plan rules). SPEC wins on rules.

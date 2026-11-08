@@ -1,5 +1,7 @@
 # Build tasks
 
+> **Deadline mode:** follow [TONIGHT.md](TONIGHT.md) tonight. It picks the subset of these tasks to build and cuts the rest.
+
 How we turn [plan.md](plan.md) into code. `plan.md` says **what** to build; this file says **who builds
 what, in what order, and how we know each piece is right**.
 

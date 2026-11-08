@@ -1,5 +1,8 @@
 # Backend next step: the "H6 thin slice" (P1–P3)
 
+> **Superseded for tonight by [TONIGHT.md](TONIGHT.md)** (two backend lanes, cut scope, 2:30 AM freeze).
+> The file-level details below still apply to the parts TONIGHT.md keeps.
+
 **Goal:** one real pump failure goes **detected → countdown → cheapest plan → API → first Sentinel explanation**,
 checked by the scorer and tests (the H6 checkpoint in `tasks.md`). The frontend already renders `/state` alerts, so it
 shows real data as soon as `/state` is real.

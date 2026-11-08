@@ -1,5 +1,7 @@
 # Avon Nightwatch: plan for EOG "Beat the Shutdown" + NVIDIA Nemotron
 
+> **Deadline mode:** for the build tonight, follow [TONIGHT.md](TONIGHT.md). It cuts this plan's scope and overrides it.
+
 > **Pitch:** Most consoles tell you what's broken. Nightwatch decides what to do, thinks one failure
 > ahead, proves its math, and gets the order to the field crew's phone, with a human approving every move.
 >
