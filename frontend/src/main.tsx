@@ -1,7 +1,7 @@
 /**
  * Frontend entry point (task T0.1). Mounts <App/> with the app-wide providers:
  *   - QueryClientProvider: TanStack Query cache for all API data (src/api/client.ts).
- *   - BrowserRouter: client-side routes (/, /field, /replay, /handoff).
+ *   - BrowserRouter: client-side routes (/, /field, /handoff; /replay is hidden for the demo, see App.tsx).
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { StrictMode } from "react";

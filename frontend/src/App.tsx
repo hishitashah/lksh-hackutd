@@ -5,8 +5,9 @@
  * Routes (plan.md "UI"):
  *   /         Command view (operator console, the demo screen)
  *   /field    phone view for the field crew (installable PWA start page)
- *   /replay   savings replay
  *   /handoff  shift handoff
+ * The savings replay page (/replay) is hidden for the demo: its backend route was cut and answers 501 with mock
+ * mode off. pages/Replay.tsx and useReplay are kept; restore the import, the NAV entry and the Route to bring it back.
  */
 import { NavLink, Route, Routes } from "react-router-dom";
 
@@ -16,12 +17,10 @@ import { cn } from "@/lib/utils";
 import { Command } from "@/pages/Command";
 import { Field } from "@/pages/Field";
 import { Handoff } from "@/pages/Handoff";
-import { Replay } from "@/pages/Replay";
 
 /** Navigation entries shown in the header. */
 const NAV = [
   { to: "/", label: "Console" },
-  { to: "/replay", label: "Replay" },
   { to: "/handoff", label: "Handoff" },
   { to: "/field", label: "Field" },
 ];
@@ -54,7 +53,6 @@ export function App() {
       <Routes>
         <Route path="/" element={<Command />} />
         <Route path="/field" element={<Field />} />
-        <Route path="/replay" element={<Replay />} />
         <Route path="/handoff" element={<Handoff />} />
       </Routes>
     </div>
