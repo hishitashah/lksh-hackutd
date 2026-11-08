@@ -1,9 +1,9 @@
-"""Check NVIDIA access: list the Nemotron models your API key can use (task T0.4).
+"""Check NVIDIA access: list the Nemotron models your API key can use (ARCHITECTURE.md §9.5).
 
 Why this exists
 ---------------
-The Nemotron model names in plan.md came from third-party guides. Before building Sentinel,
-confirm the real names on build.nvidia.com and put them in .env (SUPER_MODEL / NANO_MODEL).
+ARCHITECTURE.md §9.5: don't assume a specific Nemotron model version. Before building the agents,
+confirm which models your key can use and put them in .env (SUPER_MODEL / NANO_MODEL).
 
 What it does
 ------------

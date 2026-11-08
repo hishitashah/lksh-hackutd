@@ -13,7 +13,7 @@ A night-shift operator console for an oil field's water network.
 - **Sentinel**, an AI agent (NVIDIA Nemotron), investigates each problem, drafts actions, and waits for the operator
   to approve them. Approved orders appear live on the field crew's phones at `/field`: no app, no download.
 
-The demo story (plan.md "3-minute demo") is three pump failures in one system sharing two trucks. The console
+The demo story (ARCHITECTURE.md §16) is three pump failures in one system sharing two trucks. The console
 shows what to do, proves it's the cheapest, and Sentinel gets the order to the field.
 
 ## How to see real data right now
@@ -26,7 +26,8 @@ make setup && make dev        # from the repo root
 - **API docs: http://localhost:8000/docs.** Every endpoint and every field is listed there, with a description and units.
 - **What's real vs mock:**
   - **Real now:** `/health`, `/datasets`, `/network`.
-  - **Becoming real next** (backend slice in `backend-next.md`): `/state`, `/plan`, `/series`.
+  - **Becoming real next** (ARCHITECTURE.md phases 2–8): `/state`, `/plan`, `/series`, then the Sentinel run,
+    approve and the field feed.
   - **Everything else stays mock** until its task lands. With mock mode off, an unbuilt route answers
     `501: Not implemented yet (task …)`.
 
@@ -55,10 +56,10 @@ TypeScript in `frontend/src/api/types.ts`. So:
 | **Trend drawer** (T6.6) | `useSeries(ds, asset, metric)` | `points` ([[unix, value], …]). Metrics: tank `level_pct`; pump `status`, `flow_bpd`, `discharge_psi`; pipeline `receive_flow_bpd`, `pressure_psi`; well `water_bpd`, `status`; facility `inflow_bpd` |
 | **Time machine** (T6.8) | `useNetwork(ds)` | `time_range.{start_unix, now_unix, step_s}`. Write the position with `useConsole().setAt(unix)`. `null` means "now" |
 | **Skyline + $ ticker** (T6.12) | `useNetwork` + `useNetworkState` | one district per `system`, buildings = wells. Lights = `facilities[].wells_producing` / `wells_total`. Ticker = `lost_revenue_per_hour_total` |
-| **Sentinel panel** (T6.9) | stream from `POST /api/{ds}/agent/run` | `step` events (`AgentStep`: `step`, `status`, `title`, `message`, `tool_calls[]`, `grounded`, `elapsed_s`), then `drafts` (`DraftAction`: `label`, `action`, `event_id`, `status`), then `done` (`handoff`). It's a POST stream, so use a fetch-based reader. The multi-agent step names (feasibility, production, safety, referee) are added in T5.11 |
-| **Approval queue** (T6.9) | `POST /api/{ds}/agent/approve` | send `{run_id, action_id, approve}`. You get back the `DraftAction` with its new `status` |
+| **Sentinel panel** (T6.9) | stream from `POST /api/{ds}/agent/run` (a POST stream, so use a fetch-based SSE reader) | Events in order:<br>1. **`step`** (`AgentStep`: `step`, `status`, `title`, `message`, `tool_calls[]`, `elapsed_s`, `assessment`). Steps: `triage` → specialist agents `cost`, `environment`, `feasibility`, `production` → `orchestrator` → `act`. Specialist steps carry an **`assessment`** (`AgentAssessment`: `assessment`, `risk_level`, `findings[]`, `evidence[]`, `metrics`, `options[]` (per-plan `cost_usd` / `risk_level` / `note`), `uncertainties[]`, `explanation`, `llm_used`). **`status: "not_implemented"` means that agent didn't run: show it greyed out, never as done.**<br>2. **`recommendation`** (`Recommendation`: `selected_plans[]`, `inspections[]`, `estimated_cost_usd` vs `cheapest_cost_usd`, `environmental_risk`, `decision_policy`, `reasons[]`, `tradeoffs[]`, `alternatives[]`, `missing_assessments[]`, `explanation`).<br>3. **`drafts`** (`DraftAction[]`).<br>4. **`done`** (`run_id`, `handoff`).<br>Start the run automatically once per dataset when alerts exist |
+| **Approval queue** (T6.9) | `POST /api/{ds}/agent/approve` | send `{run_id, action_id, approve}`. You get back the `DraftAction` with its new `status` (`approved` / `rejected`, later `dispatched`) and `decided_at`. Nothing reaches `/field` unless approved |
 | **Savings replay page** (T6.10) | `useReplay(ds)` | `totals.{did_nothing, cheapest, long_run}`, `rows[]` (`event_id`, `facility_id`, `onset_unix`, `did_nothing_cost`, `plan_cost`, `saved`, `plan_label`), `cumulative[]` (`t_unix`, three running totals) |
-| **Field phone view** (T6.11) | `GET /api/{ds}/dispatches` + `EventSource` on `GET /api/{ds}/field/stream` | The **live dispatch feed**: approved orders and scheduled reminder cards arrive within about a second. No app, download or permission, so it works on iPhone. **The card shape isn't in the contract yet** (added in T5.5). Until then, design from `DraftAction.label` + `action`, and ask the backend for the final shape early |
+| **Field phone view** (T6.11) | `GET /api/{ds}/dispatches` + `EventSource` on `GET /api/{ds}/field/stream` | The **live dispatch feed**: load `GET /dispatches` (`DraftAction[]`, status `dispatched`, newest first), then `new EventSource('/api/{ds}/field/stream')` and add each **`dispatch`** event's `DraftAction` (de-duplicate by `id`; the stream may close and the browser reconnects on its own). Card: `label`, `action` (facility, trucks, trips, wells), `dispatched_at`. No app, download or permission, so it works on iPhone. Both routes return mock data now |
 | **Header** | `useHealth`, `useDatasets` | `mock` (badge), dataset list (switcher) |
 
 ## Rules (full list in the root `CLAUDE.md`)

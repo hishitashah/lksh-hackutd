@@ -63,10 +63,37 @@ ActionType = Literal["dispatch_truck", "shut_in_wells", "field_inspection", "non
 """Action types from SPEC.md "events.json". ``none`` means "do nothing / accept the trip"."""
 
 PlanKind = Literal["cheapest", "long_run", "do_nothing", "alternative"]
-"""Which role a plan plays in the plan panel (plan.md "Cheapest now vs best in the long run")."""
+"""Which role a plan plays in the plan panel: the cheapest, an alternative, or doing nothing (``long_run`` is reserved)."""
 
-AgentStepName = Literal["triage", "investigate", "plan", "verify", "act", "report"]
-"""Sentinel's six workflow steps, in order (plan.md "Sentinel")."""
+AgentStepName = Literal[
+    "triage",
+    "investigate",
+    "plan",
+    "verify",
+    "act",
+    "report",
+    "cost",
+    "environment",
+    "feasibility",
+    "production",
+    "orchestrator",
+]
+"""Names a Sentinel step can have.
+
+The multi-agent run (backend spec, Stage 2-3) uses: ``triage`` (which incidents) → one step per specialist
+agent (``cost``, ``environment``, ``feasibility``, ``production``) → ``orchestrator`` (the decision) → ``act``
+(drafts for approval). The older names stay valid so nothing that already uses them breaks.
+"""
+
+AgentName = Literal["cost", "environment", "feasibility", "production"]
+"""The four specialist agents. MVP: cost + environment run; feasibility + production report ``not_implemented``."""
+
+AssessmentStatus = Literal["completed", "not_implemented", "error", "timeout"]
+"""Outcome of one specialist agent. Anything but ``completed`` means its analysis is missing and must be shown
+as missing, never as if it ran."""
+
+RiskLevel = Literal["low", "moderate", "high", "critical"]
+"""Environmental risk levels. The rules that assign them are written down in ``agents/environment_agent.py``."""
 
 
 # ---------------------------------------------------------------------------
@@ -373,7 +400,7 @@ class Plan(ApiModel):
 
 
 class LongRunAssessment(ApiModel):
-    """Why the long-run plan differs from the cheapest one (plan.md "Cheapest now vs best in the long run")."""
+    """Why a non-cheapest plan is suggested (reserved; not produced by the current architecture)."""
 
     extra_cost_now: float = Field(description="Long-run plan cost minus cheapest plan cost, $.")
     expected_saving: float = Field(description="Expected $ saved later = risk of another failure × cost avoided.")
@@ -495,40 +522,126 @@ class ToolCall(ApiModel):
     result_summary: str = Field(description="Short summary of what the tool returned.")
 
 
+class OptionAssessment(ApiModel):
+    """One agent's view of one intervention option (a plan from the optimizer, or an inspection)."""
+
+    plan_label: str = Field(description="The option as the optimizer labels it, e.g. '1 truck, 1 trip · $905'.")
+    event_id: str = Field(description="Incident the option responds to.")
+    cost_usd: float | None = Field(default=None, description="Option cost from the optimizer, $. Cost agent only.")
+    risk_level: RiskLevel | None = Field(
+        default=None, description="Environmental risk of this option. Environment agent only."
+    )
+    note: str = Field(description="One line on this option from this agent's perspective.")
+
+
+class AgentAssessment(ApiModel):
+    """Structured result of one specialist agent (backend spec §4.1). Never silently merged into another agent's result.
+
+    Numbers in ``metrics`` and ``options`` come from deterministic backend logic (detector, optimizer).
+    Nemotron only writes ``explanation``; ``llm_used`` says whether it did.
+    """
+
+    agent: AgentName = Field(description="Which specialist produced this.")
+    incident_ids: list[str] = Field(description="Incidents (Event.id) this assessment covers.")
+    status: AssessmentStatus = Field(description="'completed', or why the analysis is missing.")
+    assessment: str | None = Field(
+        default=None, description="Headline verdict, e.g. 'Cheapest: 1 truck, 1 trip · $905' or 'Moderate risk'."
+    )
+    risk_level: RiskLevel | None = Field(default=None, description="Overall environmental risk. Environment agent only.")
+    findings: list[str] = Field(description="What the agent concluded, one point per line.")
+    evidence: list[str] = Field(description="The data behind the findings (readings, detector evidence, plan costs).")
+    metrics: dict[str, float] = Field(
+        description="Named numbers with units in the name, e.g. {'cheapest_cost_usd': 905, 'hours_to_limit_h': 1.42}."
+    )
+    options: list[OptionAssessment] = Field(description="Per-option comparison from this agent's perspective.")
+    uncertainties: list[str] = Field(description="Missing data or assumptions that could change the conclusion.")
+    suggested_interventions: list[str] = Field(description="Option labels this agent favors, best first.")
+    explanation: str = Field(description="Plain-English explanation for the operator.")
+    llm_used: bool = Field(
+        description="True if Nemotron wrote the explanation. False = deterministic text (Nemotron off or not needed)."
+    )
+    error: str | None = Field(default=None, description="Error or timeout details when status isn't 'completed'.")
+
+
+class Recommendation(ApiModel):
+    """The orchestrator's final decision (backend spec §9.4). It is the last decision-maker; the operator approves.
+
+    ``selected_plans`` are always plans the optimizer produced; the orchestrator never invents a plan or a cost.
+    """
+
+    incident_ids: list[str] = Field(description="Incidents this recommendation covers.")
+    status: Literal["completed", "partial", "failed"] = Field(
+        description="'partial' = decided without some specialist assessments (see missing_assessments)."
+    )
+    selected_plans: list[Plan] = Field(description="The chosen plan for each pump failure (a joint plan may cover several).")
+    inspections: list[PlanAction] = Field(description="Field inspections for leaks and worn pumps.")
+    estimated_cost_usd: float = Field(description="Total cost of the selected plans, $ (sum of Plan.cost_total).")
+    cheapest_cost_usd: float = Field(description="Total cost of the cheapest valid plans, $, for comparison.")
+    environmental_risk: RiskLevel | None = Field(default=None, description="Risk of the selected response, if assessed.")
+    decision_policy: str = Field(description="The rule that produced the choice, in one line.")
+    reasons: list[str] = Field(description="Why these plans were selected.")
+    tradeoffs: list[str] = Field(description="What the selection gives up (e.g. extra cost vs the cheapest option).")
+    alternatives: list[str] = Field(description="Options considered and not chosen, with their cost.")
+    uncertainties: list[str] = Field(description="What could change the decision.")
+    agents_completed: list[AgentName] = Field(description="Specialists whose assessment was used.")
+    missing_assessments: list[AgentName] = Field(description="Specialists that didn't run, failed or timed out.")
+    explanation: str = Field(description="Plain-English summary for the operator.")
+    llm_used: bool = Field(description="True if Nemotron wrote the explanation; False = deterministic fallback text.")
+    requires_operator_approval: bool = Field(description="Always true: nothing is dispatched without the operator.")
+
+
 class AgentStep(ApiModel):
-    """One streamed step of a Sentinel run (one of the six workflow steps)."""
+    """One streamed step of a Sentinel run: triage, a specialist agent, the orchestrator, or act."""
 
     run_id: str = Field(description="ID of the run this step belongs to.")
     index: int = Field(description="Position in the run, starting at 0.")
-    step: AgentStepName = Field(description="Which workflow step this is.")
-    status: Literal["running", "done", "error", "waiting_approval"] = Field(description="Step status.")
-    title: str = Field(description="Short heading for the trace, e.g. 'Plan: 3 failures share 2 trucks'.")
+    step: AgentStepName = Field(description="Which workflow step or agent this is.")
+    status: Literal["running", "done", "error", "waiting_approval", "not_implemented"] = Field(
+        description="Step status. 'not_implemented' = this agent is planned but didn't run (shown honestly, not faked)."
+    )
+    title: str = Field(description="Short heading for the trace, e.g. 'Cost: 3 failures share 2 trucks'.")
     message: str = Field(description="What Sentinel concluded in this step, in plain English.")
     tool_calls: list[ToolCall] = Field(description="Tools called in this step, in order.")
     grounded: bool | None = Field(
         default=None, description="True if every number in message came from a tool result (grounding check)."
     )
     elapsed_s: float = Field(description="Seconds since the run started.")
+    assessment: AgentAssessment | None = Field(
+        default=None, description="The structured result, on specialist-agent steps (cost, environment, ...)."
+    )
 
 
 class DraftAction(ApiModel):
-    """An action Sentinel drafted that waits in the approval queue for the operator."""
+    """An action Sentinel drafted. Lifecycle: pending → approved / rejected → dispatched → completed.
+
+    Only an operator approval moves it past 'pending'; nothing is dispatched on an AI recommendation alone.
+    """
 
     id: str = Field(description="Draft ID, used when approving or rejecting.")
     kind: ActionType = Field(description="What the draft would do.")
     label: str = Field(description="One-line description for the approval card.")
     action: PlanAction = Field(description="The exact action that runs on approval.")
     event_id: str = Field(description="Event this action responds to.")
-    status: Literal["pending", "approved", "rejected"] = Field(description="Approval status.")
+    status: Literal["pending", "approved", "rejected", "dispatched", "completed"] = Field(
+        description=(
+            "pending = drafted by Sentinel; approved/rejected = operator decision; dispatched = sent to the "
+            "field app; completed = the field crew marked it done."
+        )
+    )
+    decided_at: str | None = Field(default=None, description="When the operator approved or rejected it, ISO 8601 UTC.")
+    dispatched_at: str | None = Field(default=None, description="When it was sent to the field app, ISO 8601 UTC.")
 
 
 class AgentRunResult(ApiModel):
-    """A complete Sentinel run: all steps, the drafted actions and the shift handoff."""
+    """A complete Sentinel run: all steps, the orchestrator's recommendation, the drafts and the handoff."""
 
     run_id: str = Field(description="Run ID.")
-    steps: list[AgentStep] = Field(description="All six steps, in order.")
+    steps: list[AgentStep] = Field(description="All steps, in order.")
+    recommendation: Recommendation | None = Field(
+        default=None, description="The orchestrator's decision. Null if the run failed before deciding."
+    )
     drafts: list[DraftAction] = Field(description="Actions waiting for operator approval.")
-    handoff: str | None = Field(default=None, description="30-second shift handoff text from the report step.")
+    handoff: str | None = Field(default=None, description="30-second shift handoff text.")
 
 
 class ApproveRequest(ApiModel):

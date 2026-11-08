@@ -17,10 +17,12 @@ from fastapi.testclient import TestClient
 from nightwatch import api
 from nightwatch.config import get_settings
 from nightwatch.models import (
+    AgentRunResult,
     AgentStep,
     DraftAction,
     ExportEvent,
     PlanResponse,
+    Recommendation,
     ReplayResult,
     SeriesResponse,
     StateResponse,
@@ -38,7 +40,21 @@ MOCK_ROUTES = [
     ("get", f"/api/{DS}/events.json", None),
     ("get", f"/api/{DS}/agent/runs/run-1", None),
     ("post", f"/api/{DS}/agent/approve", {"run_id": "run-1", "action_id": "d-1", "approve": True}),
+    ("get", f"/api/{DS}/dispatches", None),
+    ("get", f"/api/{DS}/field/stream", None),
 ]
+
+
+def read_sse(resp) -> list[tuple[str, str]]:
+    """Collect (event name, data) pairs from a server-sent-events response."""
+    events: list[tuple[str, str]] = []
+    name = None
+    for line in resp.iter_lines():
+        if line.startswith("event:"):
+            name = line.split(":", 1)[1].strip()
+        elif line.startswith("data:") and name:
+            events.append((name, line.split(":", 1)[1].strip()))
+    return events
 
 
 @pytest.fixture
@@ -127,22 +143,66 @@ def test_state_alerts_follow_spec_order(client: TestClient) -> None:
     assert all(a["event"]["category"] != "pump_failure" for a in alerts[first_other:])
 
 
-def test_agent_run_streams_six_steps(client: TestClient) -> None:
-    """The Sentinel stream sends six 'step' events, then 'drafts', then 'done'."""
-    events: list[tuple[str, str]] = []
+def test_agent_run_streams_multi_agent_flow(client: TestClient) -> None:
+    """Sentinel streams triage → specialist agents → orchestrator → act, then recommendation, drafts, done."""
     with client.stream("POST", f"/api/{DS}/agent/run") as resp:
         assert resp.status_code == 200
-        name = None
-        for line in resp.iter_lines():
-            if line.startswith("event:"):
-                name = line.split(":", 1)[1].strip()
-            elif line.startswith("data:") and name:
-                events.append((name, line.split(":", 1)[1].strip()))
+        events = read_sse(resp)
     steps = [AgentStep.model_validate_json(data) for name, data in events if name == "step"]
-    assert [s.step for s in steps] == ["triage", "investigate", "plan", "verify", "act", "report"]
+    assert [s.step for s in steps] == [
+        "triage",
+        "cost",
+        "environment",
+        "feasibility",
+        "production",
+        "orchestrator",
+        "act",
+    ]
+    # Specialist steps carry their structured assessment, under their own agent name.
+    for s in steps:
+        if s.step in ("cost", "environment", "feasibility", "production"):
+            assert s.assessment is not None and s.assessment.agent == s.step
+    recommendation = Recommendation.model_validate_json(next(d for n, d in events if n == "recommendation"))
+    assert recommendation.requires_operator_approval is True
     drafts = next(json.loads(data) for name, data in events if name == "drafts")
     assert all(DraftAction.model_validate(d).status == "pending" for d in drafts)
-    assert events[-1][0] == "done"
+    assert [n for n, _ in events][-3:] == ["recommendation", "drafts", "done"]
+
+
+def test_unbuilt_agents_are_never_shown_as_completed(client: TestClient) -> None:
+    """Spec §9.2: agents that didn't run are marked not_implemented and listed as missing, never faked."""
+    run = AgentRunResult.model_validate(client.get(f"/api/{DS}/agent/runs/run-1").json())
+    by_agent = {s.assessment.agent: s for s in run.steps if s.assessment is not None}
+    for agent in ("feasibility", "production"):
+        assert by_agent[agent].status == "not_implemented"
+        assert by_agent[agent].assessment.status == "not_implemented"
+    assert run.recommendation is not None
+    assert set(run.recommendation.missing_assessments) == {"feasibility", "production"}
+    assert run.recommendation.status == "partial"
+    # The recommendation only uses plans the optimizer produced: its total is the sum of their costs.
+    total = sum(p.cost_total for p in run.recommendation.selected_plans)
+    assert abs(total - run.recommendation.estimated_cost_usd) < 0.01
+
+
+def test_approve_stamps_the_decision(client: TestClient) -> None:
+    """Approving records the operator's decision and time; rejecting is recorded too."""
+    approved = DraftAction.model_validate(
+        client.post(f"/api/{DS}/agent/approve", json={"run_id": "r", "action_id": "d-1", "approve": True}).json()
+    )
+    assert approved.status == "approved" and approved.decided_at is not None
+    rejected = client.post(f"/api/{DS}/agent/approve", json={"run_id": "r", "action_id": "d-2", "approve": False})
+    assert rejected.json()["status"] == "rejected"
+
+
+def test_field_feed_only_carries_dispatched_orders(client: TestClient) -> None:
+    """/dispatches and /field/stream carry orders that were sent to the field, never pending drafts."""
+    listed = [DraftAction.model_validate(d) for d in client.get(f"/api/{DS}/dispatches").json()]
+    assert listed and all(d.status == "dispatched" and d.dispatched_at for d in listed)
+    with client.stream("GET", f"/api/{DS}/field/stream") as resp:
+        assert resp.status_code == 200
+        events = read_sse(resp)
+    streamed = [DraftAction.model_validate_json(data) for name, data in events if name == "dispatch"]
+    assert {d.id for d in streamed} == {d.id for d in listed}
 
 
 def test_approve_unknown_draft_is_404(client: TestClient) -> None:

@@ -95,7 +95,7 @@ export interface paths {
         put?: never;
         /**
          * Run Agent
-         * @description Start a Sentinel run and stream its six steps live (T5.3).
+         * @description Start a Sentinel run and stream its progress live (backend spec §11; T5.3).
          *
          *     Use a fetch-based SSE reader in the frontend: browsers' EventSource only supports GET.
          */
@@ -126,6 +126,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/{ds}/dispatches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Dispatches
+         * @description Orders sent to the field app so far (status 'dispatched' or later), newest first (T5.5).
+         *
+         *     The /field page loads this once, then listens on /field/stream for new ones.
+         */
+        get: operations["list_dispatches_api__ds__dispatches_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/{ds}/events.json": {
         parameters: {
             query?: never;
@@ -138,6 +160,26 @@ export interface paths {
          * @description Download events in the SPEC events.json shape (T4.3).
          */
         get: operations["export_events_api__ds__events_json_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/{ds}/field/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Field Stream
+         * @description Live feed of dispatched orders for the /field phone view (T5.5 + T6.11).
+         */
+        get: operations["field_stream_api__ds__field_stream_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -274,8 +316,91 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
+         * AgentAssessment
+         * @description Structured result of one specialist agent (backend spec §4.1). Never silently merged into another agent's result.
+         *
+         *     Numbers in ``metrics`` and ``options`` come from deterministic backend logic (detector, optimizer).
+         *     Nemotron only writes ``explanation``; ``llm_used`` says whether it did.
+         */
+        AgentAssessment: {
+            /**
+             * Agent
+             * @description Which specialist produced this.
+             * @enum {string}
+             */
+            agent: "cost" | "environment" | "feasibility" | "production";
+            /**
+             * Assessment
+             * @description Headline verdict, e.g. 'Cheapest: 1 truck, 1 trip · $905' or 'Moderate risk'.
+             */
+            assessment?: string | null;
+            /**
+             * Error
+             * @description Error or timeout details when status isn't 'completed'.
+             */
+            error?: string | null;
+            /**
+             * Evidence
+             * @description The data behind the findings (readings, detector evidence, plan costs).
+             */
+            evidence: string[];
+            /**
+             * Explanation
+             * @description Plain-English explanation for the operator.
+             */
+            explanation: string;
+            /**
+             * Findings
+             * @description What the agent concluded, one point per line.
+             */
+            findings: string[];
+            /**
+             * Incident Ids
+             * @description Incidents (Event.id) this assessment covers.
+             */
+            incident_ids: string[];
+            /**
+             * Llm Used
+             * @description True if Nemotron wrote the explanation. False = deterministic text (Nemotron off or not needed).
+             */
+            llm_used: boolean;
+            /**
+             * Metrics
+             * @description Named numbers with units in the name, e.g. {'cheapest_cost_usd': 905, 'hours_to_limit_h': 1.42}.
+             */
+            metrics: {
+                [key: string]: number;
+            };
+            /**
+             * Options
+             * @description Per-option comparison from this agent's perspective.
+             */
+            options: components["schemas"]["OptionAssessment"][];
+            /**
+             * Risk Level
+             * @description Overall environmental risk. Environment agent only.
+             */
+            risk_level?: ("low" | "moderate" | "high" | "critical") | null;
+            /**
+             * Status
+             * @description 'completed', or why the analysis is missing.
+             * @enum {string}
+             */
+            status: "completed" | "not_implemented" | "error" | "timeout";
+            /**
+             * Suggested Interventions
+             * @description Option labels this agent favors, best first.
+             */
+            suggested_interventions: string[];
+            /**
+             * Uncertainties
+             * @description Missing data or assumptions that could change the conclusion.
+             */
+            uncertainties: string[];
+        };
+        /**
          * AgentRunResult
-         * @description A complete Sentinel run: all steps, the drafted actions and the shift handoff.
+         * @description A complete Sentinel run: all steps, the orchestrator's recommendation, the drafts and the handoff.
          */
         AgentRunResult: {
             /**
@@ -285,9 +410,11 @@ export interface components {
             drafts: components["schemas"]["DraftAction"][];
             /**
              * Handoff
-             * @description 30-second shift handoff text from the report step.
+             * @description 30-second shift handoff text.
              */
             handoff?: string | null;
+            /** @description The orchestrator's decision. Null if the run failed before deciding. */
+            recommendation?: components["schemas"]["Recommendation"] | null;
             /**
              * Run Id
              * @description Run ID.
@@ -295,15 +422,17 @@ export interface components {
             run_id: string;
             /**
              * Steps
-             * @description All six steps, in order.
+             * @description All steps, in order.
              */
             steps: components["schemas"]["AgentStep"][];
         };
         /**
          * AgentStep
-         * @description One streamed step of a Sentinel run (one of the six workflow steps).
+         * @description One streamed step of a Sentinel run: triage, a specialist agent, the orchestrator, or act.
          */
         AgentStep: {
+            /** @description The structured result, on specialist-agent steps (cost, environment, ...). */
+            assessment?: components["schemas"]["AgentAssessment"] | null;
             /**
              * Elapsed S
              * @description Seconds since the run started.
@@ -331,19 +460,19 @@ export interface components {
             run_id: string;
             /**
              * Status
-             * @description Step status.
+             * @description Step status. 'not_implemented' = this agent is planned but didn't run (shown honestly, not faked).
              * @enum {string}
              */
-            status: "running" | "done" | "error" | "waiting_approval";
+            status: "running" | "done" | "error" | "waiting_approval" | "not_implemented";
             /**
              * Step
-             * @description Which workflow step this is.
+             * @description Which workflow step or agent this is.
              * @enum {string}
              */
-            step: "triage" | "investigate" | "plan" | "verify" | "act" | "report";
+            step: "triage" | "investigate" | "plan" | "verify" | "act" | "report" | "cost" | "environment" | "feasibility" | "production" | "orchestrator";
             /**
              * Title
-             * @description Short heading for the trace, e.g. 'Plan: 3 failures share 2 trucks'.
+             * @description Short heading for the trace, e.g. 'Cost: 3 failures share 2 trucks'.
              */
             title: string;
             /**
@@ -465,11 +594,23 @@ export interface components {
         };
         /**
          * DraftAction
-         * @description An action Sentinel drafted that waits in the approval queue for the operator.
+         * @description An action Sentinel drafted. Lifecycle: pending → approved / rejected → dispatched → completed.
+         *
+         *     Only an operator approval moves it past 'pending'; nothing is dispatched on an AI recommendation alone.
          */
         DraftAction: {
             /** @description The exact action that runs on approval. */
             action: components["schemas"]["PlanAction"];
+            /**
+             * Decided At
+             * @description When the operator approved or rejected it, ISO 8601 UTC.
+             */
+            decided_at?: string | null;
+            /**
+             * Dispatched At
+             * @description When it was sent to the field app, ISO 8601 UTC.
+             */
+            dispatched_at?: string | null;
             /**
              * Event Id
              * @description Event this action responds to.
@@ -493,10 +634,10 @@ export interface components {
             label: string;
             /**
              * Status
-             * @description Approval status.
+             * @description pending = drafted by Sentinel; approved/rejected = operator decision; dispatched = sent to the field app; completed = the field crew marked it done.
              * @enum {string}
              */
-            status: "pending" | "approved" | "rejected";
+            status: "pending" | "approved" | "rejected" | "dispatched" | "completed";
         };
         /**
          * Event
@@ -796,7 +937,7 @@ export interface components {
         };
         /**
          * LongRunAssessment
-         * @description Why the long-run plan differs from the cheapest one (plan.md "Cheapest now vs best in the long run").
+         * @description Why a non-cheapest plan is suggested (reserved; not produced by the current architecture).
          */
         LongRunAssessment: {
             /**
@@ -893,6 +1034,37 @@ export interface components {
             systems: {
                 [key: string]: components["schemas"]["SystemOps"];
             };
+        };
+        /**
+         * OptionAssessment
+         * @description One agent's view of one intervention option (a plan from the optimizer, or an inspection).
+         */
+        OptionAssessment: {
+            /**
+             * Cost Usd
+             * @description Option cost from the optimizer, $. Cost agent only.
+             */
+            cost_usd?: number | null;
+            /**
+             * Event Id
+             * @description Incident the option responds to.
+             */
+            event_id: string;
+            /**
+             * Note
+             * @description One line on this option from this agent's perspective.
+             */
+            note: string;
+            /**
+             * Plan Label
+             * @description The option as the optimizer labels it, e.g. '1 truck, 1 trip · $905'.
+             */
+            plan_label: string;
+            /**
+             * Risk Level
+             * @description Environmental risk of this option. Environment agent only.
+             */
+            risk_level?: ("low" | "moderate" | "high" | "critical") | null;
         };
         /**
          * Pipeline
@@ -1081,6 +1253,100 @@ export interface components {
              * @description Tank level (%) at which the pump switches off.
              */
             stop_level_pct: number;
+        };
+        /**
+         * Recommendation
+         * @description The orchestrator's final decision (backend spec §9.4). It is the last decision-maker; the operator approves.
+         *
+         *     ``selected_plans`` are always plans the optimizer produced; the orchestrator never invents a plan or a cost.
+         */
+        Recommendation: {
+            /**
+             * Agents Completed
+             * @description Specialists whose assessment was used.
+             */
+            agents_completed: ("cost" | "environment" | "feasibility" | "production")[];
+            /**
+             * Alternatives
+             * @description Options considered and not chosen, with their cost.
+             */
+            alternatives: string[];
+            /**
+             * Cheapest Cost Usd
+             * @description Total cost of the cheapest valid plans, $, for comparison.
+             */
+            cheapest_cost_usd: number;
+            /**
+             * Decision Policy
+             * @description The rule that produced the choice, in one line.
+             */
+            decision_policy: string;
+            /**
+             * Environmental Risk
+             * @description Risk of the selected response, if assessed.
+             */
+            environmental_risk?: ("low" | "moderate" | "high" | "critical") | null;
+            /**
+             * Estimated Cost Usd
+             * @description Total cost of the selected plans, $ (sum of Plan.cost_total).
+             */
+            estimated_cost_usd: number;
+            /**
+             * Explanation
+             * @description Plain-English summary for the operator.
+             */
+            explanation: string;
+            /**
+             * Incident Ids
+             * @description Incidents this recommendation covers.
+             */
+            incident_ids: string[];
+            /**
+             * Inspections
+             * @description Field inspections for leaks and worn pumps.
+             */
+            inspections: components["schemas"]["PlanAction"][];
+            /**
+             * Llm Used
+             * @description True if Nemotron wrote the explanation; False = deterministic fallback text.
+             */
+            llm_used: boolean;
+            /**
+             * Missing Assessments
+             * @description Specialists that didn't run, failed or timed out.
+             */
+            missing_assessments: ("cost" | "environment" | "feasibility" | "production")[];
+            /**
+             * Reasons
+             * @description Why these plans were selected.
+             */
+            reasons: string[];
+            /**
+             * Requires Operator Approval
+             * @description Always true: nothing is dispatched without the operator.
+             */
+            requires_operator_approval: boolean;
+            /**
+             * Selected Plans
+             * @description The chosen plan for each pump failure (a joint plan may cover several).
+             */
+            selected_plans: components["schemas"]["Plan"][];
+            /**
+             * Status
+             * @description 'partial' = decided without some specialist assessments (see missing_assessments).
+             * @enum {string}
+             */
+            status: "completed" | "partial" | "failed";
+            /**
+             * Tradeoffs
+             * @description What the selection gives up (e.g. extra cost vs the cheapest option).
+             */
+            tradeoffs: string[];
+            /**
+             * Uncertainties
+             * @description What could change the decision.
+             */
+            uncertainties: string[];
         };
         /**
          * ReplayPoint
@@ -1600,7 +1866,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Server-sent events. 'step' events carry one AgentStep as JSON, then one 'drafts' event carries the list of DraftAction, then 'done' carries {run_id, handoff}. */
+            /** @description Server-sent events, in order: 'step' events (one AgentStep each: triage, each specialist agent with its AgentAssessment, the orchestrator, act), then one 'recommendation' event (the orchestrator's Recommendation), then one 'drafts' event (list of DraftAction), then 'done' ({run_id, handoff}). */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1653,6 +1919,37 @@ export interface operations {
             };
         };
     };
+    list_dispatches_api__ds__dispatches_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ds: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DraftAction"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     export_events_api__ds__events_json_get: {
         parameters: {
             query?: {
@@ -1674,6 +1971,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ExportEvent"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    field_stream_api__ds__field_stream_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ds: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Server-sent events over GET, so the browser's built-in EventSource works on any phone. Each 'dispatch' event carries one DraftAction (status 'dispatched') as JSON. The stream may close; EventSource reconnects on its own (retry hint 3 s). De-duplicate cards by DraftAction.id. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                    "text/event-stream": unknown;
                 };
             };
             /** @description Validation Error */

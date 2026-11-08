@@ -1,9 +1,160 @@
 {
   "components": {
     "schemas": {
+      "AgentAssessment": {
+        "additionalProperties": false,
+        "description": "Structured result of one specialist agent (backend spec §4.1). Never silently merged into another agent's result.\n\nNumbers in ``metrics`` and ``options`` come from deterministic backend logic (detector, optimizer).\nNemotron only writes ``explanation``; ``llm_used`` says whether it did.",
+        "properties": {
+          "agent": {
+            "description": "Which specialist produced this.",
+            "enum": [
+              "cost",
+              "environment",
+              "feasibility",
+              "production"
+            ],
+            "title": "Agent",
+            "type": "string"
+          },
+          "assessment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Headline verdict, e.g. 'Cheapest: 1 truck, 1 trip · $905' or 'Moderate risk'.",
+            "title": "Assessment"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Error or timeout details when status isn't 'completed'.",
+            "title": "Error"
+          },
+          "evidence": {
+            "description": "The data behind the findings (readings, detector evidence, plan costs).",
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence",
+            "type": "array"
+          },
+          "explanation": {
+            "description": "Plain-English explanation for the operator.",
+            "title": "Explanation",
+            "type": "string"
+          },
+          "findings": {
+            "description": "What the agent concluded, one point per line.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Findings",
+            "type": "array"
+          },
+          "incident_ids": {
+            "description": "Incidents (Event.id) this assessment covers.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Incident Ids",
+            "type": "array"
+          },
+          "llm_used": {
+            "description": "True if Nemotron wrote the explanation. False = deterministic text (Nemotron off or not needed).",
+            "title": "Llm Used",
+            "type": "boolean"
+          },
+          "metrics": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "description": "Named numbers with units in the name, e.g. {'cheapest_cost_usd': 905, 'hours_to_limit_h': 1.42}.",
+            "title": "Metrics",
+            "type": "object"
+          },
+          "options": {
+            "description": "Per-option comparison from this agent's perspective.",
+            "items": {
+              "$ref": "#/components/schemas/OptionAssessment"
+            },
+            "title": "Options",
+            "type": "array"
+          },
+          "risk_level": {
+            "anyOf": [
+              {
+                "enum": [
+                  "low",
+                  "moderate",
+                  "high",
+                  "critical"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Overall environmental risk. Environment agent only.",
+            "title": "Risk Level"
+          },
+          "status": {
+            "description": "'completed', or why the analysis is missing.",
+            "enum": [
+              "completed",
+              "not_implemented",
+              "error",
+              "timeout"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "suggested_interventions": {
+            "description": "Option labels this agent favors, best first.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Suggested Interventions",
+            "type": "array"
+          },
+          "uncertainties": {
+            "description": "Missing data or assumptions that could change the conclusion.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Uncertainties",
+            "type": "array"
+          }
+        },
+        "required": [
+          "agent",
+          "incident_ids",
+          "status",
+          "findings",
+          "evidence",
+          "metrics",
+          "options",
+          "uncertainties",
+          "suggested_interventions",
+          "explanation",
+          "llm_used"
+        ],
+        "title": "AgentAssessment",
+        "type": "object"
+      },
       "AgentRunResult": {
         "additionalProperties": false,
-        "description": "A complete Sentinel run: all steps, the drafted actions and the shift handoff.",
+        "description": "A complete Sentinel run: all steps, the orchestrator's recommendation, the drafts and the handoff.",
         "properties": {
           "drafts": {
             "description": "Actions waiting for operator approval.",
@@ -22,8 +173,19 @@
                 "type": "null"
               }
             ],
-            "description": "30-second shift handoff text from the report step.",
+            "description": "30-second shift handoff text.",
             "title": "Handoff"
+          },
+          "recommendation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Recommendation"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The orchestrator's decision. Null if the run failed before deciding."
           },
           "run_id": {
             "description": "Run ID.",
@@ -31,7 +193,7 @@
             "type": "string"
           },
           "steps": {
-            "description": "All six steps, in order.",
+            "description": "All steps, in order.",
             "items": {
               "$ref": "#/components/schemas/AgentStep"
             },
@@ -49,8 +211,19 @@
       },
       "AgentStep": {
         "additionalProperties": false,
-        "description": "One streamed step of a Sentinel run (one of the six workflow steps).",
+        "description": "One streamed step of a Sentinel run: triage, a specialist agent, the orchestrator, or act.",
         "properties": {
+          "assessment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentAssessment"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The structured result, on specialist-agent steps (cost, environment, ...)."
+          },
           "elapsed_s": {
             "description": "Seconds since the run started.",
             "title": "Elapsed S",
@@ -84,31 +257,37 @@
             "type": "string"
           },
           "status": {
-            "description": "Step status.",
+            "description": "Step status. 'not_implemented' = this agent is planned but didn't run (shown honestly, not faked).",
             "enum": [
               "running",
               "done",
               "error",
-              "waiting_approval"
+              "waiting_approval",
+              "not_implemented"
             ],
             "title": "Status",
             "type": "string"
           },
           "step": {
-            "description": "Which workflow step this is.",
+            "description": "Which workflow step or agent this is.",
             "enum": [
               "triage",
               "investigate",
               "plan",
               "verify",
               "act",
-              "report"
+              "report",
+              "cost",
+              "environment",
+              "feasibility",
+              "production",
+              "orchestrator"
             ],
             "title": "Step",
             "type": "string"
           },
           "title": {
-            "description": "Short heading for the trace, e.g. 'Plan: 3 failures share 2 trucks'.",
+            "description": "Short heading for the trace, e.g. 'Cost: 3 failures share 2 trucks'.",
             "title": "Title",
             "type": "string"
           },
@@ -290,11 +469,35 @@
       },
       "DraftAction": {
         "additionalProperties": false,
-        "description": "An action Sentinel drafted that waits in the approval queue for the operator.",
+        "description": "An action Sentinel drafted. Lifecycle: pending → approved / rejected → dispatched → completed.\n\nOnly an operator approval moves it past 'pending'; nothing is dispatched on an AI recommendation alone.",
         "properties": {
           "action": {
             "$ref": "#/components/schemas/PlanAction",
             "description": "The exact action that runs on approval."
+          },
+          "decided_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the operator approved or rejected it, ISO 8601 UTC.",
+            "title": "Decided At"
+          },
+          "dispatched_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When it was sent to the field app, ISO 8601 UTC.",
+            "title": "Dispatched At"
           },
           "event_id": {
             "description": "Event this action responds to.",
@@ -323,11 +526,13 @@
             "type": "string"
           },
           "status": {
-            "description": "Approval status.",
+            "description": "pending = drafted by Sentinel; approved/rejected = operator decision; dispatched = sent to the field app; completed = the field crew marked it done.",
             "enum": [
               "pending",
               "approved",
-              "rejected"
+              "rejected",
+              "dispatched",
+              "completed"
             ],
             "title": "Status",
             "type": "string"
@@ -836,7 +1041,7 @@
       },
       "LongRunAssessment": {
         "additionalProperties": false,
-        "description": "Why the long-run plan differs from the cheapest one (plan.md \"Cheapest now vs best in the long run\").",
+        "description": "Why a non-cheapest plan is suggested (reserved; not produced by the current architecture).",
         "properties": {
           "expected_saving": {
             "description": "Expected $ saved later = risk of another failure × cost avoided.",
@@ -992,6 +1197,64 @@
           "systems"
         ],
         "title": "Ops",
+        "type": "object"
+      },
+      "OptionAssessment": {
+        "additionalProperties": false,
+        "description": "One agent's view of one intervention option (a plan from the optimizer, or an inspection).",
+        "properties": {
+          "cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Option cost from the optimizer, $. Cost agent only.",
+            "title": "Cost Usd"
+          },
+          "event_id": {
+            "description": "Incident the option responds to.",
+            "title": "Event Id",
+            "type": "string"
+          },
+          "note": {
+            "description": "One line on this option from this agent's perspective.",
+            "title": "Note",
+            "type": "string"
+          },
+          "plan_label": {
+            "description": "The option as the optimizer labels it, e.g. '1 truck, 1 trip · $905'.",
+            "title": "Plan Label",
+            "type": "string"
+          },
+          "risk_level": {
+            "anyOf": [
+              {
+                "enum": [
+                  "low",
+                  "moderate",
+                  "high",
+                  "critical"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Environmental risk of this option. Environment agent only.",
+            "title": "Risk Level"
+          }
+        },
+        "required": [
+          "plan_label",
+          "event_id",
+          "note"
+        ],
+        "title": "OptionAssessment",
         "type": "object"
       },
       "Pipeline": {
@@ -1323,6 +1586,174 @@
           "stop_level_pct"
         ],
         "title": "Pump",
+        "type": "object"
+      },
+      "Recommendation": {
+        "additionalProperties": false,
+        "description": "The orchestrator's final decision (backend spec §9.4). It is the last decision-maker; the operator approves.\n\n``selected_plans`` are always plans the optimizer produced; the orchestrator never invents a plan or a cost.",
+        "properties": {
+          "agents_completed": {
+            "description": "Specialists whose assessment was used.",
+            "items": {
+              "enum": [
+                "cost",
+                "environment",
+                "feasibility",
+                "production"
+              ],
+              "type": "string"
+            },
+            "title": "Agents Completed",
+            "type": "array"
+          },
+          "alternatives": {
+            "description": "Options considered and not chosen, with their cost.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Alternatives",
+            "type": "array"
+          },
+          "cheapest_cost_usd": {
+            "description": "Total cost of the cheapest valid plans, $, for comparison.",
+            "title": "Cheapest Cost Usd",
+            "type": "number"
+          },
+          "decision_policy": {
+            "description": "The rule that produced the choice, in one line.",
+            "title": "Decision Policy",
+            "type": "string"
+          },
+          "environmental_risk": {
+            "anyOf": [
+              {
+                "enum": [
+                  "low",
+                  "moderate",
+                  "high",
+                  "critical"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Risk of the selected response, if assessed.",
+            "title": "Environmental Risk"
+          },
+          "estimated_cost_usd": {
+            "description": "Total cost of the selected plans, $ (sum of Plan.cost_total).",
+            "title": "Estimated Cost Usd",
+            "type": "number"
+          },
+          "explanation": {
+            "description": "Plain-English summary for the operator.",
+            "title": "Explanation",
+            "type": "string"
+          },
+          "incident_ids": {
+            "description": "Incidents this recommendation covers.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Incident Ids",
+            "type": "array"
+          },
+          "inspections": {
+            "description": "Field inspections for leaks and worn pumps.",
+            "items": {
+              "$ref": "#/components/schemas/PlanAction"
+            },
+            "title": "Inspections",
+            "type": "array"
+          },
+          "llm_used": {
+            "description": "True if Nemotron wrote the explanation; False = deterministic fallback text.",
+            "title": "Llm Used",
+            "type": "boolean"
+          },
+          "missing_assessments": {
+            "description": "Specialists that didn't run, failed or timed out.",
+            "items": {
+              "enum": [
+                "cost",
+                "environment",
+                "feasibility",
+                "production"
+              ],
+              "type": "string"
+            },
+            "title": "Missing Assessments",
+            "type": "array"
+          },
+          "reasons": {
+            "description": "Why these plans were selected.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "requires_operator_approval": {
+            "description": "Always true: nothing is dispatched without the operator.",
+            "title": "Requires Operator Approval",
+            "type": "boolean"
+          },
+          "selected_plans": {
+            "description": "The chosen plan for each pump failure (a joint plan may cover several).",
+            "items": {
+              "$ref": "#/components/schemas/Plan"
+            },
+            "title": "Selected Plans",
+            "type": "array"
+          },
+          "status": {
+            "description": "'partial' = decided without some specialist assessments (see missing_assessments).",
+            "enum": [
+              "completed",
+              "partial",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "tradeoffs": {
+            "description": "What the selection gives up (e.g. extra cost vs the cheapest option).",
+            "items": {
+              "type": "string"
+            },
+            "title": "Tradeoffs",
+            "type": "array"
+          },
+          "uncertainties": {
+            "description": "What could change the decision.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Uncertainties",
+            "type": "array"
+          }
+        },
+        "required": [
+          "incident_ids",
+          "status",
+          "selected_plans",
+          "inspections",
+          "estimated_cost_usd",
+          "cheapest_cost_usd",
+          "decision_policy",
+          "reasons",
+          "tradeoffs",
+          "alternatives",
+          "uncertainties",
+          "agents_completed",
+          "missing_assessments",
+          "explanation",
+          "llm_used",
+          "requires_operator_approval"
+        ],
+        "title": "Recommendation",
         "type": "object"
       },
       "ReplayPoint": {
@@ -1927,7 +2358,7 @@
     }
   },
   "info": {
-    "description": "Backend for the Avon Nightwatch operator console. See plan.md for the design.",
+    "description": "Backend for the Avon Nightwatch operator console. See ARCHITECTURE.md for the design.",
     "title": "Avon Nightwatch API",
     "version": "0.1.0"
   },
@@ -2058,7 +2489,7 @@
     },
     "/api/{ds}/agent/run": {
       "post": {
-        "description": "Start a Sentinel run and stream its six steps live (T5.3).\n\nUse a fetch-based SSE reader in the frontend: browsers' EventSource only supports GET.",
+        "description": "Start a Sentinel run and stream its progress live (backend spec §11; T5.3).\n\nUse a fetch-based SSE reader in the frontend: browsers' EventSource only supports GET.",
         "operationId": "run_agent_api__ds__agent_run_post",
         "parameters": [
           {
@@ -2079,7 +2510,7 @@
               },
               "text/event-stream": {}
             },
-            "description": "Server-sent events. 'step' events carry one AgentStep as JSON, then one 'drafts' event carries the list of DraftAction, then 'done' carries {run_id, handoff}."
+            "description": "Server-sent events, in order: 'step' events (one AgentStep each: triage, each specialist agent with its AgentAssessment, the orchestrator, act), then one 'recommendation' event (the orchestrator's Recommendation), then one 'drafts' event (list of DraftAction), then 'done' ({run_id, handoff})."
           },
           "422": {
             "content": {
@@ -2150,6 +2581,53 @@
         ]
       }
     },
+    "/api/{ds}/dispatches": {
+      "get": {
+        "description": "Orders sent to the field app so far (status 'dispatched' or later), newest first (T5.5).\n\nThe /field page loads this once, then listens on /field/stream for new ones.",
+        "operationId": "list_dispatches_api__ds__dispatches_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ds",
+            "required": true,
+            "schema": {
+              "title": "Ds",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/DraftAction"
+                  },
+                  "title": "Response List Dispatches Api  Ds  Dispatches Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Dispatches",
+        "tags": [
+          "field"
+        ]
+      }
+    },
     "/api/{ds}/events.json": {
       "get": {
         "description": "Download events in the SPEC events.json shape (T4.3).",
@@ -2212,6 +2690,48 @@
         "summary": "Export Events",
         "tags": [
           "export"
+        ]
+      }
+    },
+    "/api/{ds}/field/stream": {
+      "get": {
+        "description": "Live feed of dispatched orders for the /field phone view (T5.5 + T6.11).",
+        "operationId": "field_stream_api__ds__field_stream_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ds",
+            "required": true,
+            "schema": {
+              "title": "Ds",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "text/event-stream": {}
+            },
+            "description": "Server-sent events over GET, so the browser's built-in EventSource works on any phone. Each 'dispatch' event carries one DraftAction (status 'dispatched') as JSON. The stream may close; EventSource reconnects on its own (retry hint 3 s). De-duplicate cards by DraftAction.id."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Field Stream",
+        "tags": [
+          "field"
         ]
       }
     },

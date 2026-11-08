@@ -51,7 +51,7 @@ from .models import (
 app = FastAPI(
     title="Avon Nightwatch API",
     version=__version__,
-    description="Backend for the Avon Nightwatch operator console. See plan.md for the design.",
+    description="Backend for the Avon Nightwatch operator console. See ARCHITECTURE.md for the design.",
 )
 
 # The three files every dataset folder must contain (README "What you get").
@@ -266,15 +266,17 @@ def export_events(
     responses={
         200: {
             "description": (
-                "Server-sent events. 'step' events carry one AgentStep as JSON, then one 'drafts' event "
-                "carries the list of DraftAction, then 'done' carries {run_id, handoff}."
+                "Server-sent events, in order: 'step' events (one AgentStep each: triage, each specialist agent "
+                "with its AgentAssessment, the orchestrator, act), then one 'recommendation' event (the "
+                "orchestrator's Recommendation), then one 'drafts' event (list of DraftAction), then 'done' "
+                "({run_id, handoff})."
             ),
             "content": {"text/event-stream": {}},
         }
     },
 )
 async def run_agent(ds: str) -> EventSourceResponse:
-    """Start a Sentinel run and stream its six steps live (T5.3).
+    """Start a Sentinel run and stream its progress live (backend spec §11; T5.3).
 
     Use a fetch-based SSE reader in the frontend: browsers' EventSource only supports GET.
     """
@@ -287,6 +289,8 @@ async def run_agent(ds: str) -> EventSourceResponse:
         for step in run.steps:
             await asyncio.sleep(MOCK_STEP_DELAY_S)
             yield {"event": "step", "data": step.model_dump_json()}
+        if run.recommendation is not None:
+            yield {"event": "recommendation", "data": run.recommendation.model_dump_json()}
         yield {"event": "drafts", "data": json.dumps([d.model_dump() for d in run.drafts])}
         yield {"event": "done", "data": json.dumps({"run_id": run.run_id, "handoff": run.handoff})}
 
@@ -311,5 +315,46 @@ def approve_action(ds: str, body: ApproveRequest) -> DraftAction:
     for draft in mocks.mock_agent_run().drafts:
         if draft.id == body.action_id:
             draft.status = "approved" if body.approve else "rejected"
+            draft.decided_at = mocks.now_iso()
             return draft
     raise HTTPException(status_code=404, detail=f"Unknown draft action '{body.action_id}'.")
+
+
+@app.get("/api/{ds}/dispatches", response_model=list[DraftAction], tags=["field"])
+def list_dispatches(ds: str) -> list[DraftAction]:
+    """Orders sent to the field app so far (status 'dispatched' or later), newest first (T5.5).
+
+    The /field page loads this once, then listens on /field/stream for new ones.
+    """
+    _dataset_path(ds)
+    _require_mock("T5.5")
+    return mocks.mock_dispatches()
+
+
+@app.get(
+    "/api/{ds}/field/stream",
+    tags=["field"],
+    responses={
+        200: {
+            "description": (
+                "Server-sent events over GET, so the browser's built-in EventSource works on any phone. "
+                "Each 'dispatch' event carries one DraftAction (status 'dispatched') as JSON. The stream may "
+                "close; EventSource reconnects on its own (retry hint 3 s). De-duplicate cards by DraftAction.id."
+            ),
+            "content": {"text/event-stream": {}},
+        }
+    },
+)
+async def field_stream(ds: str) -> EventSourceResponse:
+    """Live feed of dispatched orders for the /field phone view (T5.5 + T6.11)."""
+    _dataset_path(ds)
+    _require_mock("T5.5")
+    dispatched = mocks.mock_dispatches()
+
+    async def stream() -> AsyncIterator[dict[str, str]]:
+        """Mock: send each dispatched order once, then close (EventSource reconnects)."""
+        for order in dispatched:
+            await asyncio.sleep(MOCK_STEP_DELAY_S)
+            yield {"event": "dispatch", "data": order.model_dump_json(), "retry": 3000}
+
+    return EventSourceResponse(stream())

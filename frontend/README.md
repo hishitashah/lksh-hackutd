@@ -1,7 +1,8 @@
 # frontend/: Avon Nightwatch UI
 
-React + TypeScript + Vite, styled with Tailwind v4 and shadcn/ui. See `plan.md` "UI" for the design and
-`tasks.md` M6 for the tasks. Run everything from the repo root with `make dev` (backend + frontend together).
+React + TypeScript + Vite, styled with Tailwind v4 and shadcn/ui. See [BRIEF.md](BRIEF.md) for what each screen
+shows and the API fields it uses, and `ARCHITECTURE.md` for the backend design. Run everything from the repo root
+with `make dev` (backend + frontend together).
 
 **New to the frontend? Read [BRIEF.md](BRIEF.md) first.** It lists what each screen shows, the exact API fields
 it uses, and the rules that keep the UI linked to the backend.

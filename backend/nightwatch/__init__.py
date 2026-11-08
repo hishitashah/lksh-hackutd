@@ -1,14 +1,14 @@
 """Avon Nightwatch backend package.
 
-Modules (see plan.md "Architecture & stack" for the full map):
+Modules (ARCHITECTURE.md §14 has the full map):
 
 * ``config``  - settings read from environment variables / ``.env``
-* ``models``  - the data contract shared with the frontend and the agent (T0.2)
-* ``mocks``   - fixture loader used while the real engine is being built (T0.3)
-* ``api``     - the FastAPI app the frontend talks to (T0.1, finished in M4)
+* ``models``  - the data contract shared with the frontend (ARCHITECTURE.md §12.1)
+* ``mocks``   - fixture loader used while the real engine is being built (clearly labelled mock data)
+* ``api``     - the FastAPI app the frontend talks to
 
-Later milestones add ``data`` (M1), ``detect`` (M2), ``sim`` / ``optimize`` /
-``replay`` (M3) and ``agent/`` (M5).
+Next, per ARCHITECTURE.md §14: ``monitoring/`` (Stage 1), ``agents/`` + ``orchestration/`` (Stages 2-3),
+``planning/`` (deterministic costs) and ``services/`` (dispatch).
 """
 
 __version__ = "0.1.0"

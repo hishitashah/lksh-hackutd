@@ -23,6 +23,7 @@ from pydantic import BaseModel
 from .config import REPO_ROOT
 from .models import (
     AgentRunResult,
+    DraftAction,
     ExportEvent,
     PlanResponse,
     ReplayResult,
@@ -89,8 +90,32 @@ def mock_replay(dataset_id: str, mode: str) -> ReplayResult:
 
 
 def mock_agent_run() -> AgentRunResult:
-    """Mock for ``POST /api/{ds}/agent/run``: a full six-step Sentinel run with drafts."""
+    """Mock for ``POST /api/{ds}/agent/run``: a full multi-agent Sentinel run.
+
+    Triage → cost + environment agents (completed) → feasibility + production (``not_implemented``,
+    shown honestly) → orchestrator → act, plus the Recommendation and 4 pending drafts.
+    """
     return _copy("agent_run.json", AgentRunResult)
+
+
+def mock_dispatches() -> list[DraftAction]:
+    """Mock for ``GET /api/{ds}/dispatches`` and ``/field/stream``: the run's drafts as if approved and sent.
+
+    Status 'dispatched' with a fixed timestamp, newest first, so the /field page can be designed before
+    the real approval flow (T5.5) exists.
+    """
+    drafts = mock_agent_run().drafts
+    for d in drafts:
+        d.status = "dispatched"
+        d.decided_at = d.dispatched_at = "2026-10-08T12:01:00Z"
+    return list(reversed(drafts))
+
+
+def now_iso() -> str:
+    """The wall-clock time now as ISO 8601 UTC. Used only to stamp operator decisions, never as dataset 'now'."""
+    from datetime import UTC, datetime
+
+    return datetime.now(tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def mock_events_export() -> list[ExportEvent]:
