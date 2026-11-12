@@ -2,16 +2,3 @@ organizer/
 test/
 *.pyc
 __pycache__/
-# Local secrets and settings (copy .env.example to .env)
-.env
-
-# Python
-.venv/
-.pytest_cache/
-.ruff_cache/
-backend/.cache/
-
-# Frontend
-node_modules/
-frontend/dist/
-frontend/dev-dist/
